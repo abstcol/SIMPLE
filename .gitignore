@@ -92,3 +92,12 @@ MUJOCO_LOG.TXT
 .claude/*
 .runtime-state/
 .robo-nix/
+
+# Reproduction diagnostics stay inside this project.
+.venv-probe/
+.cache/
+experiments/reproduction/
+
+# Project-local MuJoCo runtime and CUDA toolkit.
+.venv/
+.tools/
