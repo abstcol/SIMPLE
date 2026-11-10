@@ -311,6 +311,17 @@ class G1Wholebody(CuRoboMixin,Humanoid,Robot,HeadCamMountable,HasDexterousHand):
                                         self.joints[joint_name].qvel.item(),self.damping[joint_index], self.torque_limits[joint_index])
                 # self.actuators[joint_name].ctrl = torque
                 self.mjdata.ctrl[joint_index] = torque
+            # Hand motors need feedback during locomotion as well as arm actions.
+            # Otherwise height_adjust/stand retain the last grasp torque indefinitely,
+            # driving fingers past their target and releasing the object during lift.
+            if not replay and self.target_hand_qpos:
+                for joint_name, target_q in self.target_hand_qpos.items():
+                    joint_index = self.joints_names.index(joint_name)
+                    self.actuators[joint_name].ctrl = self.pd_control(
+                        target_q, self.joints[joint_name].qpos.item(), self.stiffness[joint_index],
+                        self.joints[joint_name].qvel.item(), self.damping[joint_index],
+                        self.torque_limits[joint_index],
+                    )
             mujoco.mj_step(self.mjmodel, self.mjdata, nstep=1)
 
         # for jname in self.hand_names:

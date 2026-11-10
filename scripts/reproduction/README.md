@@ -93,3 +93,65 @@ Franka control setup accepts both `finger_actuator1/2` (legacy assets) and
 through real MuJoCo model/data objects. The shared Franka position getter also
 iterates joint values; its test checks order, names and scalar values. FR3 has
 its own position getter and is validated by the task rollout.
+
+## G1 whole-body bend and pick (pure MuJoCo)
+
+The next acceptance scope is the unchanged `simple/G1WholebodyBendPickMP-v0`
+with AMO balance control, original scene0, cracker box 0, three distractors and
+cached Dex3 grasps. Download the three ZIP names listed by
+`prepare_g1_assets.py` from `USC-PSI-Lab/SIMPLE` on Hugging Face. Materialize the
+three `src/simple/robots/policy/*.pt` Git LFS files from upstream, then place
+copies beside the ZIPs in an input directory. The installer verifies all six
+SHA-256 hashes and retains the original project data layout. Existing GraspNet
+assets and the CUDA/cuRobo environment from the preceding setup are required.
+
+```bash
+.venv/bin/python scripts/reproduction/prepare_g1_assets.py --inputs <verified-inputs>
+.venv/bin/python -u scripts/reproduction/run_g1_bend_pick.py \
+  --output experiments/reproduction/<unique-g1-run> --seeds 7 8 9
+```
+
+The runner uses the production `MotionPlannerAgent` and its multi-phase
+`synthesize()`/execute sequence. It records the original task's success signal
+but completes the planned final stand, checking actual right-hand contact and
+sustained object lift to reject transient tosses. No object welding, qpos
+teleportation, gravity disabling, or reward/threshold changes are used. The
+additional overview camera affects only rendering. Videos show the entire
+standing/bending/grasping/lifting sequence at 50 fps; telemetry and action logs
+are retained even on failures. It stops after the first passing attempt, so
+this is a functional demonstration, not an unbiased success-rate estimate.
+
+G1 hand motors now refresh their existing PD position targets at each physics
+substep, including `height_adjust` and `stand`. Previously those locomotion
+commands retained the last grasp torque without feedback. Torque replay is
+preserved. The real-MuJoCo regression test checks the grasp-to-lift transition
+and replay behavior without requiring the full robot checkpoint:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m pytest -q scripts/reproduction/test_g1_hand_hold.py
+```
+
+For humanoid tasks with global gravity enabled, object synthetic gravity must
+be zero. The engine previously applied both, doubling a 0.1 kg object's weight.
+The gravity regression tests measure free-fall acceleration in real MuJoCo for
+both global-gravity and legacy synthetic-gravity modes, including containers.
+Normal gravity, object masses, contact/friction parameters and reward thresholds
+are retained; this is a bug-fixed functional reproduction, not an unmodified
+upstream benchmark score.
+
+A seed alone does not guarantee an identical cuRobo plan; independent replanning
+can fail even after one successful demonstration. Freeze a passing episode's
+`initial-layout.json` and `actions.json` to reproduce that trajectory in a fresh
+physics process:
+
+```bash
+.venv/bin/python -u scripts/reproduction/run_g1_bend_pick.py \
+  --output experiments/reproduction/<unique-replay> \
+  --replay-episode experiments/reproduction/<planning-run>/seed-8
+```
+
+Replay resets the original task to the saved initial scene, then sends the saved
+commands through live AMO and MuJoCo. It does not assign recorded robot/object
+states during the rollout. It runs the same contact, sustained-lift and original
+success checks, records a new video, and hashes its input artifacts. Reports
+must distinguish fresh motion planning from action-trace reproduction.
