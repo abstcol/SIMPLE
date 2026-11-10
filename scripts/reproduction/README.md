@@ -10,6 +10,10 @@ The bootstrap creates `.venv-probe` with Python 3.10 and CPU PyTorch, deliberate
 excluding Isaac Sim, cuRobo, SONIC, policy weights, and benchmark data. It is not
 equivalent to the README's full installation. Source imports use `src/`.
 
+On a slow shared filesystem, optionally set `UV_CACHE_DIR` to a disposable local
+scratch directory for package extraction. This cache is reconstructible; the
+interpreter and final `.venv-probe` still reside inside the persistent project.
+
 ```bash
 UV_BIN=/path/to/existing/uv bash scripts/reproduction/bootstrap_probe.sh
 .venv-probe/bin/python scripts/reproduction/probe.py \

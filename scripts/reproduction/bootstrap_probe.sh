@@ -7,7 +7,7 @@ if [[ -z "$UV_BIN" ]]; then
   echo 'Set UV_BIN to an existing uv executable.' >&2
   exit 1
 fi
-export UV_CACHE_DIR="$ROOT/.cache/uv-probe"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-$ROOT/.cache/uv-probe}"
 export UV_PYTHON_INSTALL_DIR="$ROOT/.cache/python-probe"
 export UV_LINK_MODE=copy
 export UV_HTTP_TIMEOUT=120
