@@ -58,8 +58,7 @@ def main():
             episode_dir.mkdir()
             env = gym.make(result['env_id'], sim_mode='mujoco', headless=True,
                            webrtc=False, scene_uid=result['scene'],
-                           target_object=result['target'], max_episode_steps=args.steps,
-                           disable_env_checker=True)
+                           target_object=result['target'], max_episode_steps=args.steps)
             writer = None
             try:
                 obs, info = env.reset(seed=seed)
@@ -68,9 +67,10 @@ def main():
                 robot = unwrapped.task.robot
                 # Execute GPU forward kinematics, not merely an import check.
                 kin = robot.kin_model
-                kin_q = torch.tensor([[robot.init_joint_states.get(name, 0.0)
+                kin_q = torch.tensor([[robot.init_joint_states.get(name.removeprefix('fr3_'), 0.0)
                                        for name in kin.joint_names]], device='cuda', dtype=torch.float32)
                 state = kin.get_state(kin_q)
+                assert state.ee_position.is_cuda
                 assert torch.isfinite(state.ee_position).all()
                 torch.cuda.synchronize()
                 print('cuRobo GPU FK:', state.ee_position.tolist(), flush=True)
