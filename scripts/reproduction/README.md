@@ -120,3 +120,13 @@ additional overview camera affects only rendering. Videos show the entire
 standing/bending/grasping/lifting sequence at 50 fps; telemetry and action logs
 are retained even on failures. It stops after the first passing attempt, so
 this is a functional demonstration, not an unbiased success-rate estimate.
+
+G1 hand motors now refresh their existing PD position targets at each physics
+substep, including `height_adjust` and `stand`. Previously those locomotion
+commands retained the last grasp torque without feedback. Torque replay is
+preserved. The real-MuJoCo regression test checks the grasp-to-lift transition
+and replay behavior without requiring the full robot checkpoint:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m pytest -q scripts/reproduction/test_g1_hand_hold.py
+```

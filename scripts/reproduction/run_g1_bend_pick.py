@@ -51,6 +51,7 @@ def run_episode(seed, output, max_steps):
         assert raw.isaac is None
         assert task.robot.uid == 'g1_wholebody'
         assert sim.mjModel.opt.gravity[2] < -9
+        result['joint_qpos_addresses'] = {sim.mjModel.joint(i).name: int(sim.mjModel.jnt_qposadr[i]) for i in range(sim.mjModel.njnt)}
         initial_z = float(info['target'][2])
         initial_pelvis = float(sim.mjData.qpos[2])
         result.update(initial_target_z=initial_z, initial_pelvis_z=initial_pelvis,
