@@ -1,6 +1,7 @@
 """Install verified upstream G1/scene/grasp assets and materialize AMO LFS files."""
 import argparse
 import hashlib
+import json
 from pathlib import Path
 import shutil
 import zipfile
@@ -27,10 +28,14 @@ def main():
         source = args.inputs/name
         if name.endswith('.zip'):
             target = ROOT/'data'
+            version = 2 if name == 'robots_g1.zip' else 1
+            expected = json.loads((target/'_versions.json').read_text()).get(name, 1)
+            assert expected <= version, f'{name}: pinned archive is older than repository metadata'
             with zipfile.ZipFile(source) as archive:
                 for member in archive.namelist():
                     assert (target/member).resolve().is_relative_to(target.resolve()), member
                 archive.extractall(target)
+            (target/f'.{name}.version').write_text(f'{version}\n')
         else:
             shutil.copy2(source, ROOT/'src/simple/robots/policy'/name)
         print('Verified and installed:', name, flush=True)
