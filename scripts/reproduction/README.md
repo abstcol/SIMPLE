@@ -56,3 +56,38 @@ MuJoCo-only image pipeline for the published visual benchmark.
 Follow the PR-before-server-validation workflow. If actual task reproduction is
 blocked, retain the draft PR with the exact tested commit and logs; do not merge
 or present component checks as a successful full reproduction.
+
+
+## Pure MuJoCo robot task
+
+The A100 can run the MuJoCo path. This phase uses the existing registered
+`simple/FrankaTabletopGraspMP-v0` task, Franka FR3 robot, GraspNet object 63 and
+HSSD scene3, with `sim_mode=mujoco`. No Isaac or SONIC dependencies are installed.
+The initial acceptance criterion is reset, camera observations and controlled
+robot motion, not successful grasping or visual benchmark parity.
+
+`bootstrap_mujoco.sh` creates `.venv` using the existing persistent Python 3.10,
+installs pinned CUDA 11.8 PyTorch and cuRobo dependencies from verified offline
+wheels, and builds the upstream cuRobo submodule at its pinned commit. Its CUDA
+compiler/runtime headers live in `.tools/cuda-11.8`; system CUDA is unchanged.
+Download the three component archives from NVIDIA's CUDA 11.8 redistribution
+index. Their official SHA-256 values are checked before extraction.
+
+```bash
+git submodule update --init --depth 1 third_party/curobo
+# Set machine-specific UV_BIN, MUJOCO_WHEELHOUSE, CUDA_ARCHIVES_DIR in the shell.
+bash scripts/reproduction/bootstrap_mujoco.sh
+PYTHONPATH=src .venv/bin/python -m pytest -q scripts/reproduction/test_franka_qpos.py
+.venv/bin/python scripts/reproduction/run_mujoco_robot.py \
+  --output experiments/reproduction/<unique-run> --steps 120 --seeds 7 8
+```
+
+The runner executes cuRobo GPU forward kinematics, verifies real joint motion and
+finite simulation state, and saves per-episode videos, first/last images and
+trajectories. It reports the task's actual reward and termination without changing
+the success checker. Seeded sinusoidal joint commands are a functional test,
+not a trained grasp policy. Assets stay in the project's `data/` directory.
+
+The Franka position getter must iterate the joint dictionary's values; iterating
+its keys fails when MuJoCo observations are built. A regression test checks joint
+order, names and scalar values through the real getter.

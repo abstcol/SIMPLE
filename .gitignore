@@ -97,3 +97,7 @@ MUJOCO_LOG.TXT
 .venv-probe/
 .cache/
 experiments/reproduction/
+
+# Project-local MuJoCo runtime and CUDA toolkit.
+.venv/
+.tools/

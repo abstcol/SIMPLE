@@ -187,7 +187,7 @@ class FrankaMixin(CuRoboMixin, WristCamMountable, HasParallelGripper):
 
     def get_robot_qpos(self) -> dict[str,float]:
         """ Get the current joint positions of the robot. """
-        return {j.name.replace("panda/", ""): j.qpos[0] for j in self.joints}
+        return {j.name.replace("panda/", ""): float(j.qpos[0]) for j in self.joints.values()}
 
     # def _set_initial_qpos(self, init_robot_qpos):
     #     ctrl_action = list(enumerate(init_robot_qpos))
