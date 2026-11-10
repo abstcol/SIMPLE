@@ -138,3 +138,20 @@ both global-gravity and legacy synthetic-gravity modes, including containers.
 Normal gravity, object masses, contact/friction parameters and reward thresholds
 are retained; this is a bug-fixed functional reproduction, not an unmodified
 upstream benchmark score.
+
+A seed alone does not guarantee an identical cuRobo plan; independent replanning
+can fail even after one successful demonstration. Freeze a passing episode's
+`initial-layout.json` and `actions.json` to reproduce that trajectory in a fresh
+physics process:
+
+```bash
+.venv/bin/python -u scripts/reproduction/run_g1_bend_pick.py \
+  --output experiments/reproduction/<unique-replay> \
+  --replay-episode experiments/reproduction/<planning-run>/seed-8
+```
+
+Replay resets the original task to the saved initial scene, then sends the saved
+commands through live AMO and MuJoCo. It does not assign recorded robot/object
+states during the rollout. It runs the same contact, sustained-lift and original
+success checks, records a new video, and hashes its input artifacts. Reports
+must distinguish fresh motion planning from action-trace reproduction.

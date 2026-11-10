@@ -29,10 +29,23 @@ import transforms3d as t3d
 from PIL import Image
 import simple.envs
 from simple.agents.mp import MotionPlannerAgent
+from simple.agents.primitive_agent import PrimitiveAgent
+from simple.core.action import ActionCmd
 from simple.mp.curobo import CuRoboPlanner
 
 
-def run_episode(seed, output, max_steps):
+class RecordedActionAgent(PrimitiveAgent):
+    """Re-execute commands through live AMO/MuJoCo, never restore recorded qpos."""
+    def __init__(self, robot, records):
+        super().__init__(robot)
+        for record in records:
+            self.queue_action(ActionCmd(record['type'], **record['parameters']))
+
+    def synthesize(self):
+        return True
+
+
+def run_episode(seed, output, max_steps, replay_episode=None):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -45,7 +58,10 @@ def run_episode(seed, output, max_steps):
         env = gym.make('simple/G1WholebodyBendPickMP-v0', sim_mode='mujoco',
                        headless=True, webrtc=False, render_hz=50,
                        max_episode_steps=max_steps)
-        obs, info = env.reset(seed=seed)
+        options = None
+        if replay_episode is not None:
+            options = {'state_dict': json.loads((replay_episode/'initial-layout.json').read_text())}
+        obs, info = env.reset(seed=seed, options=options)
         raw = env.unwrapped
         task, sim = raw.task, raw.mujoco
         assert raw.isaac is None
@@ -97,10 +113,16 @@ def run_episode(seed, output, max_steps):
             return sample
 
         record(obs, info)
-        print(f'Seed {seed}: reset complete; initializing cuRobo planner', flush=True)
-        planner = CuRoboPlanner(robot=task.robot, plan_dt=.01, plan_batch_size=1,
-                               easy_motion_gen=False, ignore_target_collisions=False)
-        agent = MotionPlannerAgent(task, planner, plan_batch_size=1)
+        if replay_episode is None:
+            print(f'Seed {seed}: reset complete; initializing cuRobo planner', flush=True)
+            planner = CuRoboPlanner(robot=task.robot, plan_dt=.01, plan_batch_size=1,
+                                   easy_motion_gen=False, ignore_target_collisions=False)
+            agent = MotionPlannerAgent(task, planner, plan_batch_size=1)
+        else:
+            print(f'Seed {seed}: re-executing recorded actions through live AMO and physics', flush=True)
+            agent = RecordedActionAgent(task.robot, json.loads((replay_episode/'actions.json').read_text()))
+            result['replay_inputs'] = {name: hashlib.sha256((replay_episode/name).read_bytes()).hexdigest()
+                                       for name in ('actions.json', 'initial-layout.json')}
         phase = 0
         while True:
             phase += 1
@@ -171,17 +193,20 @@ def main():
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--seeds', type=int, nargs='+', default=[7])
     p.add_argument('--max-steps', type=int, default=1500)
+    p.add_argument('--replay-episode', type=Path, help='Episode directory containing actions.json and initial-layout.json')
     args = p.parse_args()
+    if args.replay_episode is not None:
+        args.seeds = [json.loads((args.replay_episode/'result.json').read_text())['seed']]
     args.output.mkdir(parents=True, exist_ok=False)
     assert torch.cuda.is_available()
     result = dict(commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
                   env_id='simple/G1WholebodyBendPickMP-v0', sim_mode='mujoco',
                   gpu=torch.cuda.get_device_name(), torch=torch.__version__,
-                  task_modified=False, attempts=[])
+                  task_modified=False, mode='action_replay' if args.replay_episode else 'motion_planning', attempts=[])
     result['amo_sha256'] = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                             for p in (ROOT/'src/simple/robots/policy').glob('*.pt')}
     for seed in args.seeds:
-        result['attempts'].append(run_episode(seed, args.output/f'seed-{seed}', args.max_steps))
+        result['attempts'].append(run_episode(seed, args.output/f'seed-{seed}', args.max_steps, args.replay_episode))
         result['passed'] = any(x['passed'] for x in result['attempts'])
         (args.output/'result.json').write_text(json.dumps(result, indent=2)+'\n')
         if result['passed']:
