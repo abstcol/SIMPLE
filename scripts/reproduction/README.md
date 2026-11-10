@@ -155,3 +155,9 @@ commands through live AMO and MuJoCo. It does not assign recorded robot/object
 states during the rollout. It runs the same contact, sustained-lift and original
 success checks, records a new video, and hashes its input artifacts. Reports
 must distinguish fresh motion planning from action-trace reproduction.
+
+## SIMPLE-Phys project plan
+
+See the [SIMPLE-Phys project definition and implementation plan](../../docs/projects/simple-phys-project.md)
+for confirmed research requirements, proposed milestones, and pending compatibility checks.
+The PHYS benchmark is planned work; the existing G1 reproduction is not its completed evaluation.
