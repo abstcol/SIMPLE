@@ -12,7 +12,11 @@ export UV_PYTHON_INSTALL_DIR="$ROOT/.cache/python-probe"
 export UV_LINK_MODE=copy
 export UV_HTTP_TIMEOUT=120
 unset PYTHONPATH PYTHONHOME VIRTUAL_ENV CONDA_PREFIX
-"$UV_BIN" --no-config venv --python 3.10 "$ROOT/.venv-probe"
+if [[ ! -f "$ROOT/.venv-probe/pyvenv.cfg" ]]; then
+  "$UV_BIN" --no-config venv --python 3.10 "$ROOT/.venv-probe"
+fi
+"$ROOT/.venv-probe/bin/python" -c \
+  'import sys; assert sys.version_info[:2] == (3, 10), "Expected Python 3.10"'
 "$UV_BIN" --no-config pip install --python "$ROOT/.venv-probe/bin/python" \
   --index-url https://pypi.org/simple \
   -r "$ROOT/scripts/reproduction/probe-requirements.txt"
