@@ -130,3 +130,11 @@ and replay behavior without requiring the full robot checkpoint:
 ```bash
 PYTHONPATH=src .venv/bin/python -m pytest -q scripts/reproduction/test_g1_hand_hold.py
 ```
+
+For humanoid tasks with global gravity enabled, object synthetic gravity must
+be zero. The engine previously applied both, doubling a 0.1 kg object's weight.
+The gravity regression tests measure free-fall acceleration in real MuJoCo for
+both global-gravity and legacy synthetic-gravity modes, including containers.
+Normal gravity, object masses, contact/friction parameters and reward thresholds
+are retained; this is a bug-fixed functional reproduction, not an unmodified
+upstream benchmark score.

@@ -217,16 +217,7 @@ class MujocoSimulator(Simulator):
         self.mjData=mujoco.MjData(self.mjModel)
         self.mjSpec=mjSpec
 
-        if not self.need_gravity:
-            self.mjModel.opt.gravity= (0,0,0) # type: ignore
-            # physics = mjcf.Physics.from_mjcf_model(mjcf_model)
-            # physics.model.opt.gravity= (0,0,0) # type: ignore
-            pseudo_gravity = np.zeros(6)
-            pseudo_gravity[2] = -9.81 * 0.1#0.1 # 0.1 is the mass of the object. When changing the mass, this value should be changed accordingly!
-        else:
-            self.mjModel.opt.gravity = (0,0,-9.81)
-            pseudo_gravity = np.zeros(6)
-            pseudo_gravity[2] = -9.81 * 0.1
+        self.mjModel.opt.gravity = (0, 0, -9.81 if self.need_gravity else 0)
 
         mj_objects = {}
         obj_names = []
@@ -242,12 +233,7 @@ class MujocoSimulator(Simulator):
                 # mj_obj=physics.data.body(f"{label}")
                 # mj_obj.xfrc_applied = pseudo_gravity
                 mj_obj=self.mjData.body(f"{label}")
-                if objtype == "container":
-                    gravity= pseudo_gravity.copy()
-                    gravity[2] = -9.81*1
-                    mj_obj.xfrc_applied = gravity
-                else:
-                    mj_obj.xfrc_applied = pseudo_gravity
+                self._apply_object_gravity(mj_obj, is_container=(objtype == "container"))
                 mj_objects[objtype] = mj_obj
                 obj_names.append(label)
 
@@ -303,6 +289,13 @@ class MujocoSimulator(Simulator):
             
         # ?. reset render step
         self.render_step = 0
+
+    def _apply_object_gravity(self, mj_obj, is_container=False):
+        """Use synthetic object gravity only when global gravity is disabled."""
+        mj_obj.xfrc_applied[:] = 0
+        if not self.need_gravity:
+            # Preserve the legacy arm-only object's synthetic weight.
+            mj_obj.xfrc_applied[2] = -9.81 * (1.0 if is_container else 0.1)
 
     def _build_object(self, mjSpec, mjWorld, actor: ObjectActor):
         # asset_id = actor.asset.uid
