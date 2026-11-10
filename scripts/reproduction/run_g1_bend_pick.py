@@ -56,6 +56,9 @@ def run_episode(seed, output, max_steps):
         result.update(initial_target_z=initial_z, initial_pelvis_z=initial_pelvis,
                       target=task.target.asset.uid, instruction=task.instruction)
         (output / 'initial-layout.json').write_text(json.dumps(task.state_dict(), default=lambda x: x.tolist() if hasattr(x, 'tolist') else str(x), indent=2))
+        # Enlarge only the offscreen rendering buffer for the evidence camera.
+        sim.mjModel.vis.global_.offwidth = max(960, sim.mjModel.vis.global_.offwidth)
+        sim.mjModel.vis.global_.offheight = max(720, sim.mjModel.vis.global_.offheight)
         overview = mujoco.Renderer(sim.mjModel, height=720, width=960)
         camera = mujoco.MjvCamera()
         camera.lookat[:] = [-0.3, 0.0, 0.4]
