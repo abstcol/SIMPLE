@@ -123,7 +123,12 @@ class FrankaMixin(CuRoboMixin, WristCamMountable, HasParallelGripper):
             actuators[f"joint{i}"] = mjData.actuator(f'actuator{i}')
             joints[f"joint{i}"] = mjData.joint(f'joint{i}')
         for i in range(1, 3):
-            actuators[f"finger_joint{i}"] = mjData.actuator(f'finger_actuator{i}')
+            # Asset releases use either actuator-specific or joint names.
+            try:
+                actuator = mjData.actuator(f'finger_actuator{i}')
+            except KeyError:
+                actuator = mjData.actuator(f'finger_joint{i}')
+            actuators[f"finger_joint{i}"] = actuator
             joints[f"finger_joint{i}"] = mjData.joint(f'finger_joint{i}')
         self.joints = joints
         self.actuators = actuators

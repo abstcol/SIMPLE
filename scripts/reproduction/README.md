@@ -88,6 +88,8 @@ trajectories. It reports the task's actual reward and termination without changi
 the success checker. Seeded sinusoidal joint commands are a functional test,
 not a trained grasp policy. Assets stay in the project's `data/` directory.
 
-The Franka position getter must iterate the joint dictionary's values; iterating
-its keys fails when MuJoCo observations are built. A regression test checks joint
-order, names and scalar values through the real getter.
+Franka control setup accepts both `finger_actuator1/2` (legacy assets) and
+`finger_joint1/2` (the published FR3 asset). Tests exercise both name layouts
+through real MuJoCo model/data objects. The shared Franka position getter also
+iterates joint values; its test checks order, names and scalar values. FR3 has
+its own position getter and is validated by the task rollout.
