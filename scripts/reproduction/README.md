@@ -13,6 +13,11 @@ equivalent to the README's full installation. Source imports use `src/`.
 On a slow shared filesystem, optionally set `UV_CACHE_DIR` to a disposable local
 scratch directory for package extraction. This cache is reconstructible; the
 interpreter and final `.venv-probe` still reside inside the persistent project.
+For slow download links, `PROBE_WHEELHOUSE` may point to an offline wheel directory
+downloaded from the same two official indexes for CPython 3.10, Linux x86_64 and
+a compatible manylinux tag. Include transitive dependencies, transfer with a
+SHA-256 manifest, and verify it before installation. The pinned versions are
+unchanged and offline mode never falls back to a network index.
 
 ```bash
 UV_BIN=/path/to/existing/uv bash scripts/reproduction/bootstrap_probe.sh
