@@ -6,6 +6,7 @@ import pytest
 
 from simple.core.action import ActionCmd
 from simple.robots.g1_wholebody import G1Wholebody
+from simple.robots.controllers.combo import WholeBodyEEFController
 
 
 @pytest.mark.parametrize('replay', [False, True])
@@ -19,7 +20,7 @@ def test_locomotion_refreshes_hand_pd_but_preserves_replay_torque(monkeypatch, r
     </mujoco>''')
     data = mujoco.MjData(model)
     robot = SimpleNamespace(
-        controller=G1Wholebody.controller_cfg(),
+        controller=WholeBodyEEFController(G1Wholebody.controller_cfg),
         amo_policy=SimpleNamespace(get_action=lambda *args: (np.empty(0), [])),
         joints={'finger': data.joint('finger')}, actuators={'finger': data.actuator('finger')},
         joints_names=['finger'], mjdata=data, mjmodel=model,
