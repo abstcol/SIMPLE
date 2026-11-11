@@ -40,3 +40,35 @@ Psi0 使用独立 Python 3.11 环境；gear_sonic 使用 Python 3.10。评测入
 先以纯 MuJoCo 检查完整链路。该视觉域与官方 Isaac 渲染不同，不能把其成功率称为官方基线复现；Isaac 版仍需 RTX 条件。回放成功不能替代 Psi0 闭环成功，单个闭环成功不能证明稳定性。
 
 运行记录将在实际测试后补充；当前没有已通过标称任务的结论。
+
+## 当前安装记录
+
+运行目录由项目路径派生：`.venv-psi0`（Python 3.11）、`.venv-sonic`（Python 3.10 的增量环境）、`.tools/sonic`（GCC 13 / CMake 3.31 / TensorRT 10.9 CUDA 11）、`.tools/psi0-source/Psi0`（冻结源码）、`data/checkpoints/psi0-sonic-box`（原始权重与配置）、`data/simple-eval`（原始实例）。不运行 `uv sync` 覆盖原有 `.venv`。
+
+Psi0 的推理依赖见 `psi0-inference-requirements.txt`；用 `uv --no-config pip install` 忽略 SIMPLE 默认 CUDA 12 索引，明确固定 `torch==2.7.0+cu118`。下载失败时可在本地准备 wheel 后传到 `.cache/psi0-wheelhouse`，用 `--no-index --find-links` 安装。编译支持 `TRT_CUDA_MAJOR=11` 和 `SONIC_DOWNLOADS_DIR`。
+
+评测前 `source scripts/reproduction/sonic_env.sh` 设置本进程的项目内缓存、动态库、Python 入口。Psi0 服务使用独立进程；评测与控制器日志写入 `experiments/reproduction/psi0-sonic`。
+
+预定命令（实际结果以验证记录为准）：
+
+```bash
+source scripts/reproduction/sonic_env.sh
+export PYTHONPATH="$PWD/.tools/psi0-source/Psi0/src"
+.venv-psi0/bin/python -m psi.deploy.serve_psi0_sonic_http \
+  --policy psi0 --host 127.0.0.1 --port 8014 --ckpt-step 40000 \
+  --run-dir "$PWD/data/checkpoints/psi0-sonic-box" \
+  --rtc-mode test_time --action-exec-horizon 24
+```
+
+另一个任务 shell：
+
+```bash
+source scripts/reproduction/sonic_env.sh
+bash scripts/run_eval_wbc.sh simple/G1WholebodyXMoveBendCarryBoxSonic-v0 replay \
+  --data-dir data/simple-eval/G1WholebodyXMoveBendCarryBoxSonic-v0/dr-level-0 \
+  --episode-start 0 --num-episodes 1 --dr-level 0 --sim-mode mujoco \
+  --eval-dir experiments/reproduction/psi0-sonic/replay-0
+# 接着独立启动控制器，以 psi0 替换 replay，使用新的 eval-dir。
+```
+
+权重 SHA256：`b60c11f84887fc8b6307851c23dc9169cef4c7e292fcaaed706d6254952bc711`（本地和服务器均已核实）。Qwen 配置/processor 缓存版本：`89644892e4d85e24eaac8bacfd4f463576704203`。SONIC 模型仓库版本：`6733128a3d8a523b1418b06bca3cdf61c8b0987f`；G1 资源仓库版本：`47667c1860fbd55d98d74a0d23d1d5d773a6e9ee`。
