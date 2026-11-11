@@ -23,3 +23,4 @@ fsspec
 filelock
 pillow
 rich
+pytest

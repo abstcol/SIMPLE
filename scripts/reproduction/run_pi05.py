@@ -28,9 +28,9 @@ def trial(args, episode, variant):
         conf = json.loads(conf.replace('\\"', '"'))
     conf['dr_state_dict']['scene']['uid'] = conf['dr_state_dict']['scene']['uid'].replace('102344280', 'scene3')
     (output / 'environment_config.json').write_text(json.dumps(conf, indent=2))
-    env = StandStabilizationWrapper(gym.make(
+    env = gym.wrappers.TimeLimit(StandStabilizationWrapper(gym.make(
         'simple/G1WholebodyBendPickMP-v0', sim_mode='mujoco', headless=True,
-        webrtc=False, render_hz=50, max_episode_steps=args.max_steps))
+        webrtc=False, render_hz=50)), max_episode_steps=args.max_steps)
     writers, chunks, requests, telemetry = {}, [], [], []
     result = {'variant': variant, 'seed': args.seed, 'success': False}
     started = time.monotonic()
