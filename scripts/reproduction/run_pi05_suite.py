@@ -151,6 +151,15 @@ def run_trial(trial, output, host, port):
         kwargs = dict(sim_mode='mujoco', headless=True, render_hz=50)
         decoupled = trial['controller'] == 'decoupled'
         if decoupled:
+            import decoupled_wbc
+            import gear_sonic
+            dependency_root = Path(__file__).resolve().parents[2] / 'third_party'
+            sources = {module.__name__: str(Path(module.__file__).resolve())
+                       for module in (decoupled_wbc, gear_sonic)}
+            for name, path in sources.items():
+                if Path(path).parent != (dependency_root / name).resolve():
+                    raise RuntimeError(f'{name} must use the pinned standalone submodule, got {path}')
+            result['dependency_sources'] = sources
             from gear_sonic.utils.mujoco_sim.configs import SimLoopConfig
             from simple.baselines.pi05_decoupled_wbc import Pi05DecoupledWbcAgent
             sonic_config = SimLoopConfig().load_wbc_yaml()

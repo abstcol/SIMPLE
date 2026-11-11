@@ -204,8 +204,7 @@ class G1Sonic(CuRoboMixin,Humanoid,Robot,HeadCamMountable,HasDexterousHand):
 
         # Enable the elastic band
         if self.sonic_config["ENABLE_ELASTIC_BAND"] and self.use_floating_root_link:
-            self.elastic_band = ElasticBand()
-            self.elastic_band.point = np.array(self.spawn_pose.position[:2] + [1.0])
+            self.elastic_band = ElasticBand(point=np.array(self.spawn_pose.position[:2] + [1.0]))
             if "g1" in self.sonic_config["ROBOT_TYPE"]:
                 if self.sonic_config["enable_waist"]:
                     self.band_attached_link = mjModel.body("pelvis").id

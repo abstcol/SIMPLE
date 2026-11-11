@@ -79,7 +79,7 @@ def main():
         common[key] = str(ROOT / '.cache' / path)
     source = '.tools/psi0-source/Psi0/src'
     server_path = ':'.join(str(ROOT / path) for path in (source, source + '/openpi/openpi-client/src'))
-    sim_path = ':'.join(str(ROOT / path) for path in ('src', 'third_party/GR00T-WholeBodyControl',
+    sim_path = ':'.join(str(ROOT / path) for path in ('src', 'third_party', 'third_party/GR00T-WholeBodyControl',
         'third_party/unitree_sdk2_python', source + '/openpi/openpi-client/src', '.tools/pi05-suite-deps',
         '.venv-pi05-eval/lib/python3.10/site-packages', '.venv/lib/python3.10/site-packages'))
     base_env = {key: value for key, value in os.environ.items()

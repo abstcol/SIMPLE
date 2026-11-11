@@ -62,8 +62,14 @@ and sampling seed. Existing output directories cannot be overwritten.
 The model environment is the existing project-local `.venv-pi05`; simulation
 uses the existing Python 3.10 dependencies and a separate dependency overlay.
 The required extra packages are CPU `onnxruntime==1.20.1`, `coloredlogs==15.0.1`,
-`flatbuffers==25.9.23`, and `humanfriendly==10.0`. Restore the two official GR00T
-Balance/Walk ONNX files and URDF meshes from the frozen submodule's LFS objects.
+`flatbuffers==25.9.23`, and `humanfriendly==10.0`. Initialize the pinned submodules and check that the two official GR00T
+Balance/Walk ONNX files and required URDF meshes are real files. The standalone
+`decoupled_wbc` commit includes its required assets as ordinary Git blobs.
+Use SIMPLE's pinned standalone packages, `decoupled_wbc@5b304e4d643fe89cd000068dcbba7e7519539caa`
+and `gear_sonic@e61eeb1dec9678dcc02f97c5ac27ca6a4fe82128`, with `third_party`
+before GR00T on `PYTHONPATH`. GR00T's bundled packages have the same import names
+but incompatible reset and navigation APIs. The standalone controller consumes all
+four navigation fields, including the turning flag and target yaw.
 Keep all environments, inputs and caches within the existing project tree.
 
 Evidence per trial includes configuration/provenance, reset and stabilized state,

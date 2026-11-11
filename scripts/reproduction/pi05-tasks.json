@@ -205,16 +205,16 @@
     "Official decoupled CLI passes success_criteria=None to preserve task defaults. EvalConfig itself has other defaults, so explicit manifest values are required."
   ],
   "wbc_assets": {
-    "repo": "songlin/GR00T-WholeBodyControl",
-    "commit": "948022a6fd19bd4ad10186d587b632482453b9a2",
+    "repo": "songlin/decoupled_wbc",
+    "commit": "5b304e4d643fe89cd000068dcbba7e7519539caa",
     "files": [
       {
-        "path": "decoupled_wbc/sim2mujoco/resources/robots/g1/policy/GR00T-WholeBodyControl-Balance.onnx",
+        "path": "sim2mujoco/resources/robots/g1/policy/GR00T-WholeBodyControl-Balance.onnx",
         "sha256": "f645da599d4ca3d29ed273c8f4712620bb680d34977469ca3aeabe5bb9631c18",
         "size": 1886682
       },
       {
-        "path": "decoupled_wbc/sim2mujoco/resources/robots/g1/policy/GR00T-WholeBodyControl-Walk.onnx",
+        "path": "sim2mujoco/resources/robots/g1/policy/GR00T-WholeBodyControl-Walk.onnx",
         "sha256": "7c82255b6905ffcc4468fa7f8ddcf7b70db168cf1042107ccab887cb6a8e5407",
         "size": 1886682
       }
@@ -231,5 +231,15 @@
     ],
     "sim_seed": 0,
     "config_hash_encoding": "SHA256 of UTF-8 JSON with sort_keys=True, separators=(comma, colon), ensure_ascii=True"
+  },
+  "simulation_dependencies": {
+    "decoupled_wbc": {
+      "repo": "songlin/decoupled_wbc",
+      "commit": "5b304e4d643fe89cd000068dcbba7e7519539caa"
+    },
+    "gear_sonic": {
+      "repo": "songlin/gear_sonic",
+      "commit": "e61eeb1dec9678dcc02f97c5ac27ca6a4fe82128"
+    }
   }
 }
