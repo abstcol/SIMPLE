@@ -100,6 +100,7 @@ def main():
     parser.add_argument('--data-dir', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--episodes', type=int, default=1)
+    parser.add_argument('--episode-start', type=int, default=0)
     parser.add_argument('--max-steps', type=int, default=400)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--port', type=int, default=8015)
@@ -107,7 +108,7 @@ def main():
                         default=['original', 'plain_floor'])
     args = parser.parse_args()
     episodes = [json.loads(line) for line in (args.data_dir / 'meta/episodes.jsonl').read_text().splitlines()]
-    for episode in episodes[:args.episodes]:
+    for episode in episodes[args.episode_start:args.episode_start + args.episodes]:
         for variant in args.variants:
             trial(args, episode, variant)
 
