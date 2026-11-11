@@ -104,7 +104,10 @@ def _sonic_config() -> dict[str, Any]:
 
 
 def _progress_sample(env: SonicLocoManipEnv, info: dict[str, Any]) -> dict[str, float]:
-    pelvis = np.asarray(env.mjData.body("pelvis").xpos[:2], dtype=np.float64)
+    pelvis_body = env.mjData.body("pelvis")
+    pelvis = np.asarray(pelvis_body.xpos[:2], dtype=np.float64)
+    pelvis_rotation = np.empty(9, dtype=np.float64)
+    mujoco.mju_quat2Mat(pelvis_rotation, pelvis_body.xquat)
     target = np.asarray(info.get("target", [np.nan] * 7), dtype=np.float64)
     table = env.task.layout.actors.get("table")
     table_xy = (
@@ -115,6 +118,8 @@ def _progress_sample(env: SonicLocoManipEnv, info: dict[str, Any]) -> dict[str, 
     target_xy = target[:2]
     return {
         "sim_time": float(env.mjData.time),
+        "pelvis_z": float(pelvis_body.xpos[2]),
+        "pelvis_up_z": float(pelvis_rotation.reshape(3, 3)[2, 2]),
         "reward": float(env.task.reward),
         "pelvis_target_xy": float(np.linalg.norm(pelvis - target_xy)),
         "target_z": float(target[2]),
@@ -360,6 +365,24 @@ def run_sonic_wbc_eval(
                 ack_count=len(control_acks),
             )
             results.append(result)
+            # Retain the evidence already collected in memory so a failed rollout
+            # can be distinguished from policy/protocol failures after exit.
+            episode_output = output / f"episode_{episode_id}"
+            episode_output.mkdir(parents=True, exist_ok=True)
+            (episode_output / "diagnostics.json").write_text(json.dumps({
+                "result": asdict(result),
+                "error_message": error_message,
+                "progress_metrics": progress_metrics,
+                "inferences": [asdict(record) for record in agent.inference_records],
+                "requests": getattr(policy, "request_records", []),
+            }, indent=2) + "\n")
+            (episode_output / "progress.jsonl").write_text(
+                "".join(json.dumps(sample) + "\n" for sample in progress)
+            )
+            np.savez_compressed(
+                episode_output / "action_chunks.npz",
+                **{f"chunk_{index}": chunk for index, chunk in enumerate(agent.action_chunks)},
+            )
             sonic_env.set_timing_context(None)
 
         successes = sum(result.task_success for result in results)
