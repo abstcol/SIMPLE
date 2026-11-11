@@ -2,7 +2,7 @@
 
 > 工作名称：SIMPLE-Phys（暂定，非官方项目名称）
 > 需求确认日期：2026-11-10
-> 状态：需求已确认；任务、模型和 WBC 兼容性核查待开展；PHYS 功能尚未实现。
+> 状态：Psi0＋SONIC 现成权重部署与单次推理已验证；MuJoCo 标称闭环验收未通过；PHYS 功能尚未实现。
 > 本文区分已确认约束、实施建议和待核实事项。建议不等于实验已完成或范围已承诺。
 
 ## 1. 项目目标
@@ -67,6 +67,8 @@
 - `experiments/reproduction/g1-6c58d8c-independent8/`：独立进程重新规划失败记录。
 - `experiments/reproduction/g1-95346ca-replay1/`：冻结动作的新进程物理复现。
 - `experiments/reproduction/g1-build/`：测试及运行日志。
+
+2026-11-11 新增核查：Psi0 任务权重及 SONIC 控制器均已部署，严格加载、真实观测推理和 6 项 lockstep 测试通过；全程没有训练或微调。`G1WholebodyXMoveBendCarryBoxSonic-v0` 的纯 MuJoCo 五实例 pilot 中，Psi0 闭环与参考动作回放均为 0/5 成功，均无模型或通信错误。公开原始视觉数据的三帧离线推理与参考动作接近，但不构成闭环成功或泛化证据。因此现成模型部署可行，**标称基线尚不能冻结**，PHYS 随机化与正式排名尚未开始。具体版本、命令和证据见[核查记录](../../scripts/reproduction/psi0-sonic.md)。
 
 尚未完成：
 
