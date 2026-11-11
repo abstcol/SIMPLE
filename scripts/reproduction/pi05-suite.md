@@ -87,3 +87,8 @@ own processes. After the manifests and inputs are ready:
 `--tasks` accepts environment-name suffixes for an explicitly recorded task subset.
 The launcher records Git SHA, commands, environment overrides and child exit codes.
 It rejects an occupied service port and changed manifests/statistics.
+
+The client heartbeat timeout is 600 seconds: the official server performs inference
+synchronously, so a cold first inference on slow storage can exceed the default
+20-second pong deadline. This transport allowance does not change model inputs,
+outputs, task budgets or simulated time; each request's wall time is recorded.

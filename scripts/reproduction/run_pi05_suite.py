@@ -177,6 +177,10 @@ def run_trial(trial, output, host, port):
         result['task_metadata'] = dict(raw.task.metadata)
         agent = agent_class(raw.task.robot, host, port,
                             **({'sonic_config': sonic_config} if decoupled else {}))
+        # The synchronous official server cannot answer pings during cold GPU
+        # inference. Keep a bounded heartbeat timeout without changing inference.
+        agent.client._ws.ping_timeout = 600
+        result['client_ping_timeout_seconds'] = 600
         metadata = agent.client.get_server_metadata()
         write_json(output / 'server_metadata.json', metadata)
         if metadata.get('action_dim') != 36 or metadata.get('action_horizon') != 30:
