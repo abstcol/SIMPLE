@@ -101,3 +101,5 @@ experiments/reproduction/
 # Project-local MuJoCo runtime and CUDA toolkit.
 .venv/
 .tools/
+.venv-pi05/
+.venv-pi05-eval/
