@@ -102,3 +102,4 @@ experiments/reproduction/
 .venv/
 .tools/
 .venv-pi05/
+.venv-pi05-eval/

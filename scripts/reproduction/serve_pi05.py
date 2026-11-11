@@ -28,6 +28,8 @@ def main():
     config = Pi0Config(pi05=True, action_dim=36, action_horizon=30, max_token_len=250)
     model = PI0Pytorch(config)
     safetensors.torch.load_model(model, str(args.checkpoint), strict=True)
+    logging.info('Strict checkpoint restore passed; parameters=%d',
+                 sum(parameter.numel() for parameter in model.parameters()))
     model.paligemma_with_expert.to_bfloat16_for_selected_params('bfloat16')
     # Official rewrite_norm_stats.py maps these two training-statistics fields.
     raw = json.loads(args.stats.read_text())
