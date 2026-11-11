@@ -182,11 +182,11 @@ class SonicDecoupledWbcAgent(WholeBodyControlAgent):
     def reset(self, **kwargs):
         # Clearing the cached joint targets re-arms get_stabilize_action's
         # 2-second ramp (it keys `is_first_step` off `_cached_target_q is None`),
-        # and resetting the WBC policy clears its internal interpolation
-        # setpoint.
+        # and resetting the upper-body interpolator clears its setpoint.
+        # The pinned composite WBC only inherits Policy.reset(), a no-op.
         self._action_queue = deque()
         self._cached_target_q = None
         self._cached_left_hand_q = None
         self._cached_right_hand_q = None
-        self._wbc_policy.reset(init_time=time.monotonic())
+        self._wbc_policy.upper_body_policy.reset(init_time=time.monotonic())
         return super().reset(**kwargs)
