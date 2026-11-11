@@ -52,11 +52,13 @@ if [[ -z "${TensorRT_ROOT:-}" ]]; then
   # Pinned: this exact combo was verified end-to-end (headers must match libs;
   # the pip wheels ship libs ONLY, the public OSS repo ships the headers).
   TRT_VER="10.9.0.34"
+  TRT_CUDA_MAJOR="${TRT_CUDA_MAJOR:-12}"
+  [[ "$TRT_CUDA_MAJOR" == 11 || "$TRT_CUDA_MAJOR" == 12 ]] || { echo "TRT_CUDA_MAJOR must be 11 or 12"; exit 1; }
   TRT_ROOT_DIR="$BASE/tensorrt-root"
   if [[ ! -f "$TRT_ROOT_DIR/include/NvInfer.h" ]]; then
     UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
     [[ -x "$BASE/trt-wheel/bin/python" ]] || "$UV" venv "$BASE/trt-wheel" --quiet
-    "$UV" pip install --python "$BASE/trt-wheel/bin/python" --quiet "tensorrt-cu12==$TRT_VER"
+    "$UV" pip install --python "$BASE/trt-wheel/bin/python" --quiet "tensorrt-cu${TRT_CUDA_MAJOR}==$TRT_VER"
     LIBS_DIR="$(dirname "$(find "$BASE/trt-wheel" -name 'libnvinfer.so*' | head -1)")"
     mkdir -p "$TRT_ROOT_DIR/lib" "$TRT_ROOT_DIR/include"
     for so in "$LIBS_DIR"/lib*.so*; do
