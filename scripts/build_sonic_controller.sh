@@ -146,13 +146,17 @@ fi
 }
 
 step "Build"
+EXTRA_CMAKE_ARGS=()
+if [[ -n "${SONIC_CXX_FLAGS:-}" ]]; then
+  EXTRA_CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=$SONIC_CXX_FLAGS")
+fi
 mkdir -p "$DEPLOY/build"
 cmake -S "$DEPLOY" -B "$DEPLOY/build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
   -DMSGPACK_INCLUDE_DIR="$BASE/msgpack-cxx-6.1.1/include" \
   -DZMQ_INCLUDE_DIR="$BASE/zmq-install/include" \
   -DZMQ_LIBRARY="$BASE/zmq-install/lib/libzmq.so" \
   -DCMAKE_PREFIX_PATH="$BASE/eigen-install;$BASE/gtest-install" \
-  -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST="$BASE/googletest-1.14.0"
+  -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST="$BASE/googletest-1.14.0" "${EXTRA_CMAKE_ARGS[@]}"
 cmake --build "$DEPLOY/build" -j"$BUILD_JOBS"
 
 step "Write $BASE/sonic_env.sh (single source-able runtime env)"
