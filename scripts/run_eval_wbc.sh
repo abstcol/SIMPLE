@@ -46,12 +46,18 @@ trap cleanup EXIT INT TERM
   exit 1
 }
 
-for port in 5556 5557 13579; do
-  if ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq ":${port}$"; then
-    echo "required port $port is occupied; refusing to stop an unknown process" >&2
-    exit 1
-  fi
-done
+# Minimal containers may not provide iproute2/ss. Probe with the selected
+# Python's standard library and never terminate an existing listener.
+"$EVAL_WBC_PYTHON" - <<'PYPORT'
+import socket
+for port in (5556, 5557, 13579):
+    with socket.socket() as probe:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind(("0.0.0.0", port))
+        except OSError as exc:
+            raise SystemExit(f"required port {port} unavailable; refusing to stop an unknown process: {exc}")
+PYPORT
 
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
 export MUJOCO_GL=${MUJOCO_GL:-egl}
