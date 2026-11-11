@@ -104,7 +104,10 @@ def _sonic_config() -> dict[str, Any]:
 
 
 def _progress_sample(env: SonicLocoManipEnv, info: dict[str, Any]) -> dict[str, float]:
-    pelvis = np.asarray(env.mjData.body("pelvis").xpos[:2], dtype=np.float64)
+    pelvis_body = env.mjData.body("pelvis")
+    pelvis = np.asarray(pelvis_body.xpos[:2], dtype=np.float64)
+    pelvis_rotation = np.empty(9, dtype=np.float64)
+    mujoco.mju_quat2Mat(pelvis_rotation, pelvis_body.xquat)
     target = np.asarray(info.get("target", [np.nan] * 7), dtype=np.float64)
     table = env.task.layout.actors.get("table")
     table_xy = (
@@ -115,6 +118,8 @@ def _progress_sample(env: SonicLocoManipEnv, info: dict[str, Any]) -> dict[str, 
     target_xy = target[:2]
     return {
         "sim_time": float(env.mjData.time),
+        "pelvis_z": float(pelvis_body.xpos[2]),
+        "pelvis_up_z": float(pelvis_rotation.reshape(3, 3)[2, 2]),
         "reward": float(env.task.reward),
         "pelvis_target_xy": float(np.linalg.norm(pelvis - target_xy)),
         "target_z": float(target[2]),

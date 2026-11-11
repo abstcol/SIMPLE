@@ -1,0 +1,10 @@
+# Incremental Python 3.10 dependencies; base .venv is read-only via run_sonic_eval.
+numpy==1.26.4
+pin==2.7.0
+pyzmq
+msgpack
+hydra-core
+cyclonedds==0.10.2
+pandas==2.3.3
+pyarrow==20.0.0
+tyro==0.9.32
