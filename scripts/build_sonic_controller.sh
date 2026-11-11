@@ -112,7 +112,7 @@ cp -rn "$BASE/msgpack-cxx-6.1.1/include/." "$BASE/zmq-install/include/" 2>/dev/n
 step "Eigen3 (header-only)"
 if [[ ! -d "$BASE/eigen-install" ]]; then
   fetch https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz | tar xz -C "$BASE"
-  cmake -S "$BASE/eigen-3.4.0" -B "$BASE/eigen-3.4.0/b" -DCMAKE_INSTALL_PREFIX="$BASE/eigen-install" >/dev/null
+  cmake -S "$BASE/eigen-3.4.0" -B "$BASE/eigen-3.4.0/b" -DCMAKE_INSTALL_PREFIX="$BASE/eigen-install" -DBUILD_TESTING=OFF -DEIGEN_BUILD_DOC=OFF >/dev/null
   cmake --install "$BASE/eigen-3.4.0/b" >/dev/null
 fi
 
