@@ -19,4 +19,5 @@ os.environ.setdefault("MUJOCO_GL", "egl")
 os.environ.setdefault("HF_HOME", str(ROOT / ".cache/huggingface"))
 os.environ.setdefault("XDG_CACHE_HOME", str(ROOT / ".cache/runtime"))
 os.environ.setdefault("TORCH_EXTENSIONS_DIR", str(ROOT / ".cache/torch-extensions"))
-runpy.run_module("simple.cli.eval_wbc", run_name="__main__")
+if __name__ == "__main__":
+    runpy.run_module("simple.cli.eval_wbc", run_name="__main__")
