@@ -40,6 +40,16 @@ export UV_PYTHON_INSTALL_DIR="${UV_PYTHON_INSTALL_DIR:-$ROOT_DIR/.tools/python}"
 mkdir -p "$BASE" "$UV_CACHE_DIR"
 [[ -d "$DEPLOY" ]] || { echo "gear_sonic_deploy not found at $DEPLOY"; exit 1; }
 
+# Optionally stage the exact release files on another machine first.
+fetch() {
+  local url="$1" name="${2:-${1##*/}}"
+  if [[ -n "${SONIC_DOWNLOADS_DIR:-}" && -f "$SONIC_DOWNLOADS_DIR/$name" ]]; then
+    cat "$SONIC_DOWNLOADS_DIR/$name"
+  else
+    curl -fsSL --retry 3 "$url"
+  fi
+}
+
 step "TensorRT"
 if [[ -z "${TensorRT_ROOT:-}" ]]; then
   for c in /usr/local/cuda/targets/x86_64-linux /usr/local/cuda-*/targets/x86_64-linux \
@@ -68,16 +78,16 @@ if [[ -z "${TensorRT_ROOT:-}" ]]; then
     done
     # OSS repo tags are 3-component (v10.9.0); pip wheels are 4 (10.9.0.34)
     TRT_TAG="v${TRT_VER%.*}"
-    curl -fsSL --retry 3 "https://github.com/NVIDIA/TensorRT/archive/refs/tags/$TRT_TAG.tar.gz" \
+    fetch "https://github.com/NVIDIA/TensorRT/archive/refs/tags/$TRT_TAG.tar.gz" "TensorRT-${TRT_TAG#v}.tar.gz" \
       | tar xz -C "$BASE" "TensorRT-${TRT_TAG#v}/include"
     cp -r "$BASE/TensorRT-${TRT_TAG#v}/include/." "$TRT_ROOT_DIR/include/"
   fi
   # NvOnnxParser.h lives in the onnx-tensorrt SUBMODULE, which GitHub archive
   # tarballs exclude — fetch it separately from the matching GA branch
   [[ -f "$TRT_ROOT_DIR/include/NvOnnxParser.h" ]] || \
-    curl -fsSL --retry 3 \
+    fetch \
       "https://raw.githubusercontent.com/onnx/onnx-tensorrt/release/${TRT_VER%.*.*}-GA/NvOnnxParser.h" \
-      -o "$TRT_ROOT_DIR/include/NvOnnxParser.h"
+      > "$TRT_ROOT_DIR/include/NvOnnxParser.h"
   TensorRT_ROOT="$TRT_ROOT_DIR"
 fi
 export TensorRT_ROOT
@@ -85,13 +95,13 @@ echo "   TensorRT_ROOT=$TensorRT_ROOT"
 
 step "onnxruntime (official prebuilt)"
 ORT="$BASE/onnxruntime-linux-x64-gpu-1.22.0"
-[[ -d "$ORT" ]] || curl -fsSL --retry 3 \
+[[ -d "$ORT" ]] || fetch \
   https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-linux-x64-gpu-1.22.0.tgz \
   | tar xz -C "$BASE"
 export onnxruntime_ROOT="$ORT"
 
 step "msgpack-cxx (header-only)"
-[[ -d "$BASE/msgpack-cxx-6.1.1" ]] || curl -fsSL --retry 3 \
+[[ -d "$BASE/msgpack-cxx-6.1.1" ]] || fetch \
   https://github.com/msgpack/msgpack-c/releases/download/cpp-6.1.1/msgpack-cxx-6.1.1.tar.gz \
   | tar xz -C "$BASE"
 # The main binary's include paths only propagate the shared ZMQ include dir,
@@ -101,14 +111,14 @@ cp -rn "$BASE/msgpack-cxx-6.1.1/include/." "$BASE/zmq-install/include/" 2>/dev/n
 
 step "Eigen3 (header-only)"
 if [[ ! -d "$BASE/eigen-install" ]]; then
-  curl -fsSL --retry 3 https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz | tar xz -C "$BASE"
+  fetch https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz | tar xz -C "$BASE"
   cmake -S "$BASE/eigen-3.4.0" -B "$BASE/eigen-3.4.0/b" -DCMAKE_INSTALL_PREFIX="$BASE/eigen-install" >/dev/null
   cmake --install "$BASE/eigen-3.4.0/b" >/dev/null
 fi
 
 step "GTest"
 if [[ ! -d "$BASE/gtest-install" ]]; then
-  curl -fsSL --retry 3 https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz | tar xz -C "$BASE"
+  fetch https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz googletest-1.14.0.tar.gz | tar xz -C "$BASE"
   cmake -S "$BASE/googletest-1.14.0" -B "$BASE/googletest-1.14.0/b" \
     -DCMAKE_INSTALL_PREFIX="$BASE/gtest-install" -DCMAKE_BUILD_TYPE=Release >/dev/null
   cmake --build "$BASE/googletest-1.14.0/b" -j"$BUILD_JOBS" >/dev/null
@@ -117,22 +127,22 @@ fi
 
 step "libzmq"
 if [[ ! -f "$BASE/zmq-install/lib/libzmq.so" ]]; then
-  curl -fsSL --retry 3 https://github.com/zeromq/libzmq/releases/download/v4.3.5/zeromq-4.3.5.tar.gz | tar xz -C "$BASE"
+  fetch https://github.com/zeromq/libzmq/releases/download/v4.3.5/zeromq-4.3.5.tar.gz | tar xz -C "$BASE"
   ( cd "$BASE/zeromq-4.3.5" && ./configure --prefix="$BASE/zmq-install" >/dev/null \
     && make -j"$BUILD_JOBS" >/dev/null 2>&1 && make install >/dev/null )
 fi
 # cppzmq: the C++ header binding (zmq.hpp) is a SEPARATE project from libzmq
 [[ -f "$BASE/zmq-install/include/zmq.hpp" ]] || {
-  curl -fsSL --retry 3 https://raw.githubusercontent.com/zeromq/cppzmq/v4.10.0/zmq.hpp \
-    -o "$BASE/zmq-install/include/zmq.hpp"
-  curl -fsSL --retry 3 https://raw.githubusercontent.com/zeromq/cppzmq/v4.10.0/zmq_addon.hpp \
-    -o "$BASE/zmq-install/include/zmq_addon.hpp"
+  fetch https://raw.githubusercontent.com/zeromq/cppzmq/v4.10.0/zmq.hpp \
+    > "$BASE/zmq-install/include/zmq.hpp"
+  fetch https://raw.githubusercontent.com/zeromq/cppzmq/v4.10.0/zmq_addon.hpp \
+    > "$BASE/zmq-install/include/zmq_addon.hpp"
 }
 # nlohmann/json: header-only, used by the zmq test targets
 [[ -f "$BASE/zmq-install/include/nlohmann/json.hpp" ]] || {
   mkdir -p "$BASE/zmq-install/include/nlohmann"
-  curl -fsSL --retry 3 https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp \
-    -o "$BASE/zmq-install/include/nlohmann/json.hpp"
+  fetch https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp \
+    > "$BASE/zmq-install/include/nlohmann/json.hpp"
 }
 
 step "Build"
@@ -141,7 +151,8 @@ cmake -S "$DEPLOY" -B "$DEPLOY/build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_
   -DMSGPACK_INCLUDE_DIR="$BASE/msgpack-cxx-6.1.1/include" \
   -DZMQ_INCLUDE_DIR="$BASE/zmq-install/include" \
   -DZMQ_LIBRARY="$BASE/zmq-install/lib/libzmq.so" \
-  -DCMAKE_PREFIX_PATH="$BASE/eigen-install;$BASE/gtest-install"
+  -DCMAKE_PREFIX_PATH="$BASE/eigen-install;$BASE/gtest-install" \
+  -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST="$BASE/googletest-1.14.0"
 cmake --build "$DEPLOY/build" -j"$BUILD_JOBS"
 
 step "Write $SONIC_TOOLS_DIR/sonic_env.sh (single source-able runtime env)"
