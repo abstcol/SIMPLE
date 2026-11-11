@@ -101,3 +101,7 @@ experiments/reproduction/
 # Project-local MuJoCo runtime and CUDA toolkit.
 .venv/
 .tools/
+
+# Isolated policy and SONIC environments.
+.venv-psi0/
+.venv-sonic/

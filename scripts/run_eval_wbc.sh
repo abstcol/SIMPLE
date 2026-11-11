@@ -12,7 +12,9 @@ shift 2
 
 DEPLOY="$ROOT_DIR/third_party/GR00T-WholeBodyControl/gear_sonic_deploy"
 CONTROLLER_BIN="$DEPLOY/target/release/g1_deploy_onnx_ref"
-LOGS="${TMPDIR:-/tmp}/eval_wbc_logs"
+LOGS="${EVAL_WBC_LOG_DIR:-$ROOT_DIR/experiments/reproduction/sonic/logs}"
+SONIC_ENV_FILE="${SONIC_ENV_FILE:-${SONIC_TOOLS_DIR:-$HOME/tools}/sonic_env.sh}"
+EVAL_WBC_PYTHON="${EVAL_WBC_PYTHON:-$ROOT_DIR/.venv/bin/python}"
 mkdir -p "$LOGS"
 CONTROLLER_LOG="$LOGS/controller.log"
 CTRL_PID=
@@ -39,8 +41,8 @@ trap cleanup EXIT INT TERM
   echo "lockstep controller binary missing: $CONTROLLER_BIN" >&2
   exit 1
 }
-[[ -f "$HOME/tools/sonic_env.sh" ]] || {
-  echo "runtime environment missing: $HOME/tools/sonic_env.sh" >&2
+[[ -f "$SONIC_ENV_FILE" ]] || {
+  echo "runtime environment missing: $SONIC_ENV_FILE" >&2
   exit 1
 }
 
@@ -63,11 +65,11 @@ if [[ -z "${CUDAToolkit_ROOT:-}" && -x "${CUDA_HOME:-}/bin/nvcc" ]]; then
 fi
 
 : > "$CONTROLLER_LOG"
-setsid env DEPLOY="$DEPLOY" CONTROLLER_BIN="$CONTROLLER_BIN" bash -c '
+setsid env SONIC_ENV_FILE="$SONIC_ENV_FILE" DEPLOY="$DEPLOY" CONTROLLER_BIN="$CONTROLLER_BIN" bash -c '
   set +e +u +o pipefail
-  source "$HOME/tools/sonic_env.sh"
+  source "$SONIC_ENV_FILE"
   cd "$DEPLOY"
-  source scripts/setup_env.sh
+  # sonic_env.sh supplies runtime libraries without setup_env.sh global Git mutations.
   exec env SONIC_FORCE_UNITREE_DDS=1 SONIC_AUTO_START=1 \
     "$CONTROLLER_BIN" lo policy/release/model_decoder.onnx reference/example/ \
     --obs-config policy/release/observation_config.yaml \
@@ -121,7 +123,7 @@ VIEW_FLAG="--no-headless"
 
 echo "eval: $ENV_ID $POLICY $VIEW_FLAG  (Ctrl+C here stops everything)"
 if [[ -n "${EVAL_WBC_WRAPPER:-}" ]]; then
-  .venv/bin/python -u "$EVAL_WBC_WRAPPER" "$ENV_ID" "$POLICY" "$VIEW_FLAG" "$@"
+  "$EVAL_WBC_PYTHON" -u "$EVAL_WBC_WRAPPER" "$ENV_ID" "$POLICY" "$VIEW_FLAG" "$@"
 else
-  .venv/bin/python -u -m simple.cli.eval_wbc "$ENV_ID" "$POLICY" "$VIEW_FLAG" "$@"
+  "$EVAL_WBC_PYTHON" -u -m simple.cli.eval_wbc "$ENV_ID" "$POLICY" "$VIEW_FLAG" "$@"
 fi
