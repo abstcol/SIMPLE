@@ -23,8 +23,9 @@ def main():
     parser.add_argument('--stats', type=Path, required=True)
     parser.add_argument('--port', type=int, default=8015)
     parser.add_argument('--seed', type=int, default=0)
+    parser.add_argument('--task', default='G1WholebodyBendPickMP-v0')
     args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.INFO, force=True)
     config = Pi0Config(pi05=True, action_dim=36, action_horizon=30, max_token_len=250)
     model = PI0Pytorch(config)
     safetensors.torch.load_model(model, str(args.checkpoint), strict=True)
@@ -40,7 +41,7 @@ def main():
     class SeededPolicy(Policy):
         def infer(self, obs, **kwargs):
             if obs.get('reset', False):
-                torch.manual_seed(args.seed)
+                torch.manual_seed(int(obs.get('model_seed', args.seed)))
             return super().infer(obs, **kwargs)
 
     policy = SeededPolicy(
@@ -53,7 +54,7 @@ def main():
                     transforms.PadStatesAndActions(config.action_dim)],
         output_transforms=[transforms.Unnormalize(stats, use_quantiles=True), HfmOutputs()],
         is_pytorch=True, pytorch_device='cuda',
-        metadata={'task': 'G1WholebodyBendPickMP-v0', 'action_dim': 36,
+        metadata={'task': args.task, 'action_dim': 36,
                   'action_horizon': 30, 'seed': args.seed,
                   'stats_source': str(args.stats), 'checkpoint': str(args.checkpoint)},
     )

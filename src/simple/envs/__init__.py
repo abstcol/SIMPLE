@@ -127,6 +127,13 @@ register(
     kwargs={"task":"g1_wholebody_xmove_pick_teleop"},
 )
 
+# Restore the original task registration removed in upstream 7b64c576.
+register(
+    id="simple/G1WholebodyXMoveBendPickTeleop-v0",
+    entry_point="simple.envs.sonic_loco_manip:SonicLocoManipEnv",
+    kwargs={"task":"g1_wholebody_xmove_bend_pick_teleop"},
+)
+
 
 
 
