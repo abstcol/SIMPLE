@@ -9,7 +9,6 @@ import carb
 import carb.settings
 import numpy as np
 import omni.isaac.core.utils.prims as isaacsim_prims
-import omni.isaac.core.utils.stage as isaacsim_stage
 import omni.kit.commands
 import omni.kit.primitive.mesh
 import omni.replicator.core as rep
@@ -67,6 +66,20 @@ from simple.utils import env_flag, resolve_data_path
 # state, closer to every-step rendering but slower: 16 cut the closed-loop eval from ~25 to ~9 steps/s
 # (see docs/plan_eval_render_on_query.md). Renders without a gap always use 1.
 _SPARSE_RENDER_RT_SUBFRAMES = 1
+
+
+
+def _add_asset_reference(usd_path: str, prim_path: str):
+    """Preserve SIMPLE's mesh coordinates and explicit scene-axis transforms."""
+    # Isaac 5.x's stage helper automatically converts USD units/up axes. SIMPLE
+    # already normalizes these itself; conversion shrinks objects and rotates rooms twice.
+    stage = omni.usd.get_context().get_stage()
+    prim = stage.GetPrimAtPath(prim_path)
+    if not prim.IsValid():
+        prim = stage.DefinePrim(prim_path, "Xform")
+    if not prim.GetReferences().AddReference(usd_path):
+        raise FileNotFoundError(usd_path)
+    return prim
 
 
 
@@ -369,7 +382,7 @@ class IsaacSimSimulator(Simulator):
                 data_dir = resolve_data_path(scene.data_dir)
 
             env_url = os.path.abspath(f"{data_dir}/{scene.name}.usd")
-            isaacsim_stage.add_reference_to_stage(usd_path=env_url, prim_path=scene_prim_path)
+            _add_asset_reference(usd_path=env_url, prim_path=scene_prim_path)
             scene_prim = self.world.stage.GetPrimAtPath(scene_prim_path)
 
             surface_prim = self.world.stage.GetPrimAtPath(surface_prim_path)
@@ -611,7 +624,7 @@ class IsaacSimSimulator(Simulator):
         object_usd_path = getattr(object_info.asset, "usd_path", None)
         if object_usd_path:
             object_usd_path = os.path.abspath(resolve_data_path(object_usd_path, auto_download=True))
-            isaacsim_stage.add_reference_to_stage(usd_path=object_usd_path, prim_path=object_prim_path)
+            _add_asset_reference(usd_path=object_usd_path, prim_path=object_prim_path)
 
             obj_xform = XFormPrim(prim_path=object_prim_path)
             geom_prim_path = f'{object_prim_path}/Meshes'
@@ -919,7 +932,7 @@ class IsaacSimSimulator(Simulator):
         obj_name = obj_info.asset.name
         uid = obj_info.asset.uid
 
-        isaacsim_stage.add_reference_to_stage(
+        _add_asset_reference(
             usd_path=self.resolve_data_path(obj_info.asset.usd_path),
             prim_path=f"{self.workspace_prim_path}/articulated_objects",
         )
@@ -969,7 +982,7 @@ class IsaacSimSimulator(Simulator):
         eef_prim_path = self.task.robot.eef_prim_path
         hand_prim_path = self.task.robot.hand_prim_path
 
-        isaacsim_stage.add_reference_to_stage(
+        _add_asset_reference(
             usd_path=self.resolve_data_path(self.task.robot.usd_path),
             prim_path=f"{self.workspace_prim_path}/Robot",
         )
