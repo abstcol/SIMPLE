@@ -80,6 +80,7 @@ def main():
         obs, info = env.reset(seed=trial['sim_seed'], options={'state_dict': config})
         raw = env.unwrapped
         assert raw.isaac is not None
+        raw.isaac.world.stage.GetRootLayer().Export(str(args.output / 'scene_first.usda'))
         for name in ('head_stereo_left', 'front_stereo_left'):
             writers[name] = imageio.get_writer(args.output / f'{name}.mp4', fps=50,
                                                codec='libx264', macro_block_size=1)
@@ -105,6 +106,7 @@ def main():
                 print(f'Rendered {index}/{len(commands)}; reward={float(reward):.3f}', flush=True)
         for name in writers:
             Image.fromarray(obs[name]).save(args.output / f'{name}_last.png')
+        raw.isaac.world.stage.GetRootLayer().Export(str(args.output / 'scene_last.usda'))
         result.update(passed=True, task_success=bool(raw._success), final_reward=float(reward))
     except BaseException as error:
         result.update(error=repr(error), traceback=traceback.format_exc())
