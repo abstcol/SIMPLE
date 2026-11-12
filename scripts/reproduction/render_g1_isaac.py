@@ -3,6 +3,7 @@
 This is recorded-command replay, not a fresh VLA inference or benchmark score.
 """
 import argparse
+import faulthandler
 import hashlib
 import importlib.metadata
 import json
@@ -70,6 +71,7 @@ def main():
                                 for name in ('trial.json', 'commands.json')}}
     env, writers, states = None, {}, []
     started = time.monotonic()
+    faulthandler.dump_traceback_later(120, repeat=True)
     try:
         print('Creating G1 environment', flush=True)
         env = StandStabilizationWrapper(gym.make(trial['env_id'], sim_mode='mujoco_isaac',
@@ -108,6 +110,7 @@ def main():
         result.update(error=repr(error), traceback=traceback.format_exc())
         raise
     finally:
+        faulthandler.cancel_dump_traceback_later()
         for writer in writers.values():
             writer.close()
         if states:
