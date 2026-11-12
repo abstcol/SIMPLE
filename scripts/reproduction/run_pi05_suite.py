@@ -289,10 +289,6 @@ def run_trial(trial, output, host, port, sim_mode='mujoco'):
             np.savez_compressed(output / 'states.npz', qpos=np.stack([s[0] for s in states]),
                                 qvel=np.stack([s[1] for s in states]))
         write_json(output / 'result.json', result)
-        # Kit shutdown can terminate its process. Persist all evidence first;
-        # the parent process owns suite accounting and the next trial.
-        if env is not None:
-            env.close()
         for name, data in [('requests', requests), ('commands', commands),
                            ('telemetry', telemetry), ('stabilization', stabilization)]:
             try:
@@ -300,6 +296,10 @@ def run_trial(trial, output, host, port, sim_mode='mujoco'):
             except Exception as error:
                 cleanup_errors.append(f'{name}.json: {error!r}')
         write_json(output / 'result.json', result)
+        # Kit shutdown can terminate its process. Persist all evidence first;
+        # the parent process owns suite accounting and the next trial.
+        if env is not None:
+            env.close()
         if cleanup_errors and result['outcome'] != 'error':
             result.update(outcome='error', error='Failed to close output resources')
             write_json(output / 'result.json', result)
