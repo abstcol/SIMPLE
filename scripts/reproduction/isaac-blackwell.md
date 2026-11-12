@@ -37,6 +37,11 @@ Isaac also needs the official `vMaterials_2.zip` resource under `data/`; SIMPLE
 downloads and extracts it on first use if absent. Retain the existing asset
 version markers when migrating `data/` between servers.
 
+If Kit reports duplicate Vulkan ICDs for one GPU, select the verified NVIDIA
+manifest for this process, for example
+`export VK_DRIVER_FILES=/etc/vulkan/icd.d/nvidia_icd.json`. Do not remove the
+server's driver files. See the [Vulkan loader documentation](https://github.com/KhronosGroup/Vulkan-Loader/blob/main/docs/LoaderDriverInterface.md).
+
 The rendering check consumes one saved AMO trial from the six-task evaluation:
 
 ```bash
