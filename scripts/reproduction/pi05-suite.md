@@ -127,6 +127,25 @@ Keep Isaac's pinned `websockets==12.0` (the official synchronous client supports
 its interface); the separate model service uses `websockets==15.0.1`. Version 12's
 synchronous client has no automatic heartbeat, recorded as a null ping timeout.
 
+The Unitree SDK also imports `cyclonedds==0.10.2`. If no Python 3.11 wheel is
+available, build its C library inside the project before installing the binding:
+
+```bash
+git clone https://github.com/eclipse-cyclonedds/cyclonedds.git .tools/cyclonedds-source
+git -C .tools/cyclonedds-source checkout 9995905bce6c4cf9f740d6438bbf7fcfd1c83dfd
+cmake -S .tools/cyclonedds-source -B .tools/cyclonedds-build \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/.tools/cyclonedds" \
+  -DBUILD_EXAMPLES=OFF -DBUILD_TESTING=OFF
+cmake --build .tools/cyclonedds-build -j 4
+cmake --install .tools/cyclonedds-build
+export CYCLONEDDS_HOME="$PWD/.tools/cyclonedds"
+uv --no-config pip install --python .venv-isaac/bin/python cyclonedds==0.10.2
+```
+
+Retain `CYCLONEDDS_HOME` in the private `.env.isaac` activation file. The
+in-process GR00T evaluator uses the SDK's simulator types; it does not connect
+to a physical robot.
+
 ```bash
 source .env.isaac
 .venv-isaac/bin/python scripts/reproduction/launch_pi05_suite.py \
