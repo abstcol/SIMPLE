@@ -119,9 +119,12 @@ On Blackwell, use the isolated `.venv-isaac` simulator and `.venv-pi05` model
 with CUDA 12.8 PyTorch. Preserve the earlier model environment's package pins
 except for the compatible PyTorch/torchvision/CUDA stack. Apply the same official
 Psi0 transformers replacements in `.venv-pi05` only. The simulator additionally
-needs `onnxruntime==1.20.1`, `websockets==15.0.1`, and `msgpack==1.2.4`, plus the
+needs `onnxruntime==1.20.1` and `msgpack==1.2.4`, plus the
 same pinned standalone WBC submodules. Follow [isaac-blackwell.md](isaac-blackwell.md)
 for rendering requirements and its known asset/version limitations.
+Keep Isaac's pinned `websockets==12.0` (the official synchronous client supports
+its interface); the separate model service uses `websockets==15.0.1`. Version 12's
+synchronous client has no automatic heartbeat, recorded as a null ping timeout.
 
 ```bash
 source .env.isaac

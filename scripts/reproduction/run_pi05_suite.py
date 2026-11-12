@@ -139,8 +139,10 @@ def run_trial(trial, output, host, port, sim_mode='mujoco'):
                             **({'sonic_config': sonic_config} if decoupled else {}))
         # The synchronous official server cannot answer pings during cold GPU
         # inference. Keep a bounded heartbeat timeout without changing inference.
-        agent.client._ws.ping_timeout = 600
-        result['client_ping_timeout_seconds'] = 600
+        if hasattr(agent.client._ws, 'ping_timeout'):
+            agent.client._ws.ping_timeout = 600
+        # Isaac's websockets 12 sync client has no automatic heartbeat.
+        result['client_ping_timeout_seconds'] = getattr(agent.client._ws, 'ping_timeout', None)
         metadata = agent.client.get_server_metadata()
         write_json(output / 'server_metadata.json', metadata)
         if metadata.get('action_dim') != 36 or metadata.get('action_horizon') != 30:
