@@ -71,13 +71,14 @@ def main():
                                 for name in ('trial.json', 'commands.json')}}
     env, writers, states = None, {}, []
     started = time.monotonic()
-    faulthandler.dump_traceback_later(120, repeat=True)
+    faulthandler.dump_traceback_later(300, repeat=True)
     try:
         print('Creating G1 environment', flush=True)
         env = StandStabilizationWrapper(gym.make(trial['env_id'], sim_mode='mujoco_isaac',
                                                  headless=True, webrtc=False, render_hz=50))
         print('Resetting scene and warming up AMO', flush=True)
         obs, info = env.reset(seed=trial['sim_seed'], options={'state_dict': config})
+        faulthandler.cancel_dump_traceback_later()
         raw = env.unwrapped
         assert raw.isaac is not None
         raw.isaac.world.stage.GetRootLayer().Export(str(args.output / 'scene_first.usda'))
