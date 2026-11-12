@@ -32,7 +32,7 @@ uv --no-config pip check --python .venv-isaac/bin/python
 ```
 
 Use a fresh environment; omit the `venv` creation command when resuming an existing
-installation. The dependency list preserves Isaac's matplotlib/trimesh pins.
+installation. The dependency list preserves Isaac's numpy/matplotlib/trimesh pins.
 Isaac also needs the official `vMaterials_2.zip` resource under `data/`; SIMPLE
 downloads and extracts it on first use if absent. Retain the existing asset
 version markers when migrating `data/` between servers.
