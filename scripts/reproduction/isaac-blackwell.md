@@ -9,6 +9,34 @@ Keep the existing `data/` layout and AMO assets. Build the pinned cuRobo submodu
 for the new Python/CUDA environment; do not copy an older compiled environment.
 The base project's Python requirement and default lockfile remain unchanged.
 
+From the project root, with `uv` and CUDA 12.8's compiler available:
+
+```bash
+export UV_CACHE_DIR="$PWD/.cache/uv-isaac" UV_LINK_MODE=copy
+export UV_PYTHON_INSTALL_DIR="$PWD/.tools/python-isaac"
+export UV_PYTHON_BIN_DIR="$PWD/.tools/python-isaac/bin"
+uv --no-config python install 3.11
+uv --no-config venv --python 3.11 .venv-isaac
+uv --no-config pip install --python .venv-isaac/bin/python \
+  'isaacsim[all,extscache]==5.1.0' \
+  'torch==2.7.0+cu128' 'torchvision==0.22.0+cu128' \
+  -r scripts/reproduction/isaac-blackwell-requirements.txt \
+  --extra-index-url https://pypi.nvidia.com \
+  --extra-index-url https://download.pytorch.org/whl/cu128 \
+  --index-strategy unsafe-best-match
+git submodule update --init third_party/curobo
+export CUDA_HOME=/usr/local/cuda TORCH_CUDA_ARCH_LIST=12.0 MAX_JOBS=2
+uv --no-config pip install --python .venv-isaac/bin/python \
+  --no-deps --no-build-isolation './third_party/curobo[isaacsim]'
+uv --no-config pip check --python .venv-isaac/bin/python
+```
+
+Use a fresh environment; omit the `venv` creation command when resuming an existing
+installation. The dependency list preserves Isaac's matplotlib/trimesh pins.
+Isaac also needs the official `vMaterials_2.zip` resource under `data/`; SIMPLE
+downloads and extracts it on first use if absent. Retain the existing asset
+version markers when migrating `data/` between servers.
+
 The rendering check consumes one saved AMO trial from the six-task evaluation:
 
 ```bash
