@@ -45,6 +45,8 @@ def main():
                           'SIMPLE_ISAAC_PORTABLE_ROOT': '.cache/isaac-kit'}.items():
         os.environ.setdefault(key, str(ROOT / relative))
     os.environ.setdefault('MUJOCO_GL', 'egl')
+    for key in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS'):
+        os.environ.setdefault(key, '4')
     sys.path.insert(0, str(ROOT / 'src'))
 
     import gymnasium as gym
@@ -69,8 +71,10 @@ def main():
     env, writers, states = None, {}, []
     started = time.monotonic()
     try:
+        print('Creating G1 environment', flush=True)
         env = StandStabilizationWrapper(gym.make(trial['env_id'], sim_mode='mujoco_isaac',
                                                  headless=True, webrtc=False, render_hz=50))
+        print('Resetting scene and warming up AMO', flush=True)
         obs, info = env.reset(seed=trial['sim_seed'], options={'state_dict': config})
         raw = env.unwrapped
         assert raw.isaac is not None
