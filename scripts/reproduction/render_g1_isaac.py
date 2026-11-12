@@ -40,6 +40,7 @@ def main():
     for key, relative in {'XDG_CACHE_HOME': '.cache/isaac-runtime',
                           'XDG_DATA_HOME': '.cache/isaac-data',
                           'HF_HOME': '.cache/huggingface',
+                          'CUDA_CACHE_PATH': '.cache/cuda-isaac',
                           'TORCH_EXTENSIONS_DIR': '.cache/torch-extensions-isaac',
                           'SIMPLE_ISAAC_PORTABLE_ROOT': '.cache/isaac-kit'}.items():
         os.environ.setdefault(key, str(ROOT / relative))
