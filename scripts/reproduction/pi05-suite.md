@@ -104,3 +104,43 @@ The client heartbeat timeout is 600 seconds: the official server performs infere
 synchronously, so a cold first inference on slow storage can exceed the default
 20-second pong deadline. This transport allowance does not change model inputs,
 outputs, task budgets or simulated time; each request's wall time is recorded.
+
+## Isaac closed-loop evaluation on RTX 5090
+
+The same frozen manifests can be used with `--sim-mode mujoco_isaac`. MuJoCo
+still advances physics; the live Isaac head-camera image is sent to pi0.5 on
+every policy query. This mode does not replay saved actions. The existing task
+budgets, controllers, scene configurations, model seeds and success rules are
+unchanged. Isaac renders every control step using the environment's default
+synchronization. No extra rollout pacing is added; renderer/inference wall time
+can affect the original WBC interpolation, so this is not a texture-only ablation.
+
+On Blackwell, use the isolated `.venv-isaac` simulator and `.venv-pi05` model
+with CUDA 12.8 PyTorch. Preserve the earlier model environment's package pins
+except for the compatible PyTorch/torchvision/CUDA stack. Apply the same official
+Psi0 transformers replacements in `.venv-pi05` only. The simulator additionally
+needs `onnxruntime==1.20.1`, `websockets==15.0.1`, and `msgpack==1.2.4`, plus the
+same pinned standalone WBC submodules. Follow [isaac-blackwell.md](isaac-blackwell.md)
+for rendering requirements and its known asset/version limitations.
+
+```bash
+source .env.isaac
+.venv-isaac/bin/python scripts/reproduction/launch_pi05_suite.py \
+  --sim-mode mujoco_isaac \
+  --manifests experiments/reproduction/pi05-isaac/manifests \
+  --data-root data/pi05-suite --weights-root data/checkpoints/pi05-suite \
+  --output experiments/reproduction/pi05-isaac/formal-01
+```
+
+Copy the previously frozen manifests byte-for-byte; run separate pilots on the PR
+before merging and starting the formal suite. Each Isaac trial runs in a fresh
+process because Kit cannot restart after shutdown. The model service stays alive
+for the task, but history and sampling seed reset per trial. Shutdown errors stop
+the batch and are infrastructure errors, never policy failures.
+
+`head_stereo_left.mp4` records actual Isaac policy observations. AMO tasks also
+save `front_stereo_left.mp4` from Isaac. The extra `overview.mp4` remains a MuJoCo
+diagnostic view and is explicitly identified as such in results. Per-query PNGs,
+image hashes and request/action records verify the closed loop. Report all 20
+trials per task; choose success/failure examples only from that frozen set. If a
+task has no success or no failure, report that instead of altering the protocol.
