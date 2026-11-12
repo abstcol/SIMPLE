@@ -1,0 +1,26 @@
+# SIMPLE/AMO dependencies alongside Isaac Sim 5.1's pinned Python packages.
+# Keep matplotlib/trimesh at Isaac's versions; do not overlay probe-requirements.txt.
+numpy==1.26.0
+chardet==5.2.0
+mujoco==3.3.6
+dm-control==1.0.21
+gymnasium==1.2.1
+transforms3d==0.4.2
+python-dotenv==1.1.1
+huggingface-hub==0.36.0
+pillow==11.3.0
+rich==14.1.0
+typer==0.17.4
+imageio-ffmpeg==0.6.0
+importlib-resources==6.5.2
+warp-lang==1.7.0
+numpy-quaternion==2024.0.7
+yourdfpy==0.0.58
+scikit-image==0.25.2
+pybind11==2.13.6
+setuptools==78.1.0
+setuptools-scm==8.3.1
+wheel==0.45.1
+ninja==1.11.1.4
+tomli==2.2.1
+python-fcl==0.7.0.8
