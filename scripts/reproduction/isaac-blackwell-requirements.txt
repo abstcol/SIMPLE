@@ -11,6 +11,7 @@ pillow==11.3.0
 rich==14.1.0
 typer==0.17.4
 imageio-ffmpeg==0.6.0
+importlib-resources==6.5.2
 warp-lang==1.7.0
 numpy-quaternion==2024.0.7
 yourdfpy==0.0.58
