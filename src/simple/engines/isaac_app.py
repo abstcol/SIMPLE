@@ -79,6 +79,9 @@ def create_simulation_app(
     if disable_throttling_async:
         settings.append((THROTTLING_ENABLE_ASYNC, "false", False))
     extra_args = [f"--{key}={arg_value}" for key, arg_value, _ in settings]
+    portable_root = os.getenv("SIMPLE_ISAAC_PORTABLE_ROOT", "").strip()
+    if portable_root:
+        extra_args += ["--portable-root", os.path.abspath(portable_root)]
     if not enable_lula:
         extra_args += [
             f"--/app/extensions/excluded/{index}={name}"
