@@ -111,8 +111,10 @@ The same frozen manifests can be used with `--sim-mode mujoco_isaac`. MuJoCo
 still advances physics; the live Isaac head-camera image is sent to pi0.5 on
 every policy query. This mode does not replay saved actions. The existing task
 budgets, controllers, scene configurations, model seeds and success rules are
-unchanged. Isaac renders every control step using the environment's default
-synchronization. No extra rollout pacing is added; renderer/inference wall time
+unchanged. Isaac renders once after every completed control step. Decoupled tasks
+use SIMPLE's `sync_isaac_every_substep=False` option; all four MuJoCo physics
+substeps still execute, and every policy/video frame comes from the current state.
+No extra rollout pacing is added; renderer/inference wall time
 can affect the original WBC interpolation, so this is not a texture-only ablation.
 
 On Blackwell, use the isolated `.venv-isaac` simulator and `.venv-pi05` model

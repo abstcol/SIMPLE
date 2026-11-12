@@ -127,6 +127,12 @@ def run_trial(trial, output, host, port, sim_mode='mujoco'):
             import importlib.metadata
             if raw.isaac is None or not raw.render_isaac:
                 raise RuntimeError('Isaac policy rendering is not enabled')
+            if decoupled:
+                # Isaac mirrors the completed control step; retain every MuJoCo
+                # physics substep without rendering its intermediate states.
+                raw.sync_isaac_every_substep = False
+            result['isaac_render_cadence'] = 'every_control_step'
+            result['isaac_sync_every_substep'] = getattr(raw, 'sync_isaac_every_substep', None)
             result['isaacsim_version'] = importlib.metadata.version('isaacsim')
         result.update(torch_version=torch.__version__, mujoco_version=mujoco.__version__)
         threshold = effective_threshold(raw.task, trial['env_id'])
