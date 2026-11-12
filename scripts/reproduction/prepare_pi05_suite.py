@@ -5,28 +5,12 @@ the frozen official release in pi05-tasks.json. --pilot emits the first initial
 condition with both model seeds per task; these trials never count toward the main set.
 """
 import argparse
-import hashlib
 import json
 from pathlib import Path
 
-from run_pi05_suite import decode_environment_config, validate_manifest, write_json
-
-
-def sha256(data):
-    return hashlib.sha256(data).hexdigest()
-
-
-def config_hash(config):
-    return sha256(json.dumps(config, sort_keys=True, separators=(',', ':'),
-                             ensure_ascii=True, allow_nan=False).encode())
-
-
-def checked_read(path, expected_sha):
-    content = path.read_bytes()
-    actual_sha = sha256(content)
-    if actual_sha != expected_sha:
-        raise ValueError(f'Frozen metadata mismatch: {path}: {actual_sha} != {expected_sha}')
-    return content
+from pi05_common import (
+    checked_read, config_hash, decode_environment_config, sha256, validate_manifest, write_json,
+)
 
 
 def prepare_task(contract, catalog, data_root, pilot):

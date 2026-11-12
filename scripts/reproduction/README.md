@@ -1,4 +1,20 @@
-# SIMPLE reproduction diagnostics
+# SIMPLE reproduction tools
+
+Start with the guide for the experiment you want to run:
+
+| Purpose | Guide / entry point |
+|---|---|
+| Six-task pretrained pi0.5 evaluation | [pi05-suite.md](pi05-suite.md): prepare → launch → evaluate |
+| Earlier BendPick floor-appearance pilot | [pi05.md](pi05.md): `run_pi05.py` |
+| G1 motion-planner demonstration or action replay | [G1 instructions](#g1-whole-body-bend-and-pick-pure-mujoco): `run_g1_bend_pick.py` |
+| Installation and component diagnostics | Instructions below: `probe.py`, `run_mujoco_robot.py` |
+
+The floor-appearance pilot and motion-planner demonstration use different protocols
+from the six-task evaluation. Keep their outputs separate. Shared pi0.5 metadata
+validation and JSON/hash helpers live in `pi05_common.py`; it needs only Python's
+standard library. The CLI scripts retain their existing names and arguments.
+
+## Installation diagnostics
 
 These scripts first distinguish package/platform compatibility from MuJoCo
 component functionality. They do not modify SIMPLE's simulator, task logic,

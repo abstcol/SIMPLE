@@ -1,6 +1,5 @@
 """Run prepared pi0.5 task manifests sequentially with isolated model services."""
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -9,7 +8,7 @@ import socket
 import subprocess
 import time
 
-from run_pi05_suite import validate_manifest, write_json
+from pi05_common import checked_read, validate_manifest, write_json
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / 'scripts/reproduction'
@@ -47,16 +46,13 @@ def main():
         if args.tasks and name not in args.tasks:
             continue
         manifest = (args.manifests / item['manifest']).resolve()
-        if hashlib.sha256(manifest.read_bytes()).hexdigest() != item['manifest_sha256']:
-            raise ValueError(f'Manifest changed after preparation: {manifest}')
-        records = validate_manifest(json.loads(manifest.read_text()))
+        records = validate_manifest(json.loads(checked_read(manifest, item['manifest_sha256'])))
         checkpoint = (args.weights_root / records[0]['weight_task'] / 'model.safetensors').resolve()
         stats = (args.data_root / 'train' / name / 'meta/stats.json').resolve()
         for path in (checkpoint, stats, ROOT / '.venv-pi05/bin/python', ROOT / '.venv-sonic/bin/python'):
             if not path.is_file():
                 raise FileNotFoundError(path)
-        if hashlib.sha256(stats.read_bytes()).hexdigest() != records[0]['metadata_source']['train_stats_sha256']:
-            raise ValueError(f'Training statistics changed after preparation: {stats}')
+        checked_read(stats, records[0]['metadata_source']['train_stats_sha256'])
         folder = args.output / name
         tasks.append({'task': name, 'status': 'unrun', 'server_command': [str(ROOT / '.venv-pi05/bin/python'), '-u',
                       str(SCRIPTS / 'serve_pi05.py'), '--checkpoint', str(checkpoint), '--stats', str(stats),

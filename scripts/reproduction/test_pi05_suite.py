@@ -8,10 +8,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-
-spec = importlib.util.spec_from_file_location('pi05_suite', Path(__file__).with_name('run_pi05_suite.py'))
-suite = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(suite)
+import run_pi05_suite as suite
 
 
 def trial(index=0):
