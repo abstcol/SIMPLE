@@ -6,6 +6,12 @@ conditions, not twenty independent scenes. Use the original MuJoCo appearance;
 this suite has no gray-floor intervention and is not an Isaac-rendered evaluation.
 No training is required.
 
+The entry points have one responsibility each:
+`prepare_pi05_suite.py` freezes manifests, `launch_pi05_suite.py` manages model
+services and task processes, and `run_pi05_suite.py` executes and records trials.
+They share the lightweight validation/serialization functions in `pi05_common.py`.
+`serve_pi05.py` supplies the unchanged official model and transforms.
+
 `pi05-tasks.json` freezes official model/data revisions, source-file SHA256 hashes,
 normalization statistics, each task's controller, step budget and success rule.
 The model architecture/transforms are unchanged. Each checkpoint uses its own

@@ -16,6 +16,8 @@ import simple.envs
 from simple.baselines.pi05 import Pi05Agent
 from simple.envs.wrappers import StandStabilizationWrapper
 
+from pi05_common import decode_environment_config
+
 
 def trial(args, episode, variant):
     output = args.output / f'episode_{episode["episode_index"]}' / variant
@@ -23,10 +25,7 @@ def trial(args, episode, variant):
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    conf = episode['environment_config']
-    if isinstance(conf, str):
-        conf = json.loads(conf.replace('\\"', '"'))
-    conf['dr_state_dict']['scene']['uid'] = conf['dr_state_dict']['scene']['uid'].replace('102344280', 'scene3')
+    conf = decode_environment_config(episode['environment_config'])
     (output / 'environment_config.json').write_text(json.dumps(conf, indent=2))
     env = gym.wrappers.TimeLimit(StandStabilizationWrapper(gym.make(
         'simple/G1WholebodyBendPickMP-v0', sim_mode='mujoco', headless=True,
