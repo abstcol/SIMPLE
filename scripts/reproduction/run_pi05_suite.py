@@ -1,4 +1,4 @@
-"""Evaluate one pi0.5 task manifest with official agents in pure MuJoCo.
+"""Evaluate one pi0.5 task manifest with official agents and live policy images.
 
 Each trial clears cached Task/Robot instances before constructing its environment
 and controller; the external model server stays loaded. Videos cover every policy
@@ -13,6 +13,9 @@ import json
 import math
 from pathlib import Path
 import random
+import signal
+import subprocess
+import sys
 import time
 import traceback
 
@@ -60,7 +63,7 @@ def rollout(step, raw, max_steps, trailing_steps):
     return success, termination
 
 
-def run_trial(trial, output, host, port):
+def run_trial(trial, output, host, port, sim_mode='mujoco'):
     import gymnasium as gym
     import imageio.v2 as imageio
     import mujoco
@@ -77,7 +80,10 @@ def run_trial(trial, output, host, port):
     write_json(output / 'environment_config.json', conf)
     result = {'trial_id': trial['trial_id'], 'outcome': 'error', 'success': None,
               'scored_steps': 0, 'trailing_steps': 0, 'inference_count': 0,
-              'sim_mode': 'mujoco', 'rollout_pacing': 'official_pure_mujoco_no_sleep',
+              'sim_mode': sim_mode, 'rollout_pacing': 'no_added_rollout_sleep',
+              'execution': 'closed_loop_inference',
+              'policy_image_source': 'isaac' if 'isaac' in sim_mode else 'mujoco',
+              'overview_image_source': 'mujoco',
               'video_fps': 50, 'controller_recreated': True}
     writers, chunks, requests, telemetry, stabilization = {}, [], [], [], []
     commands, states = [], []
@@ -87,7 +93,7 @@ def run_trial(trial, output, host, port):
         random.seed(trial['sim_seed'])
         np.random.seed(trial['sim_seed'])
         torch.manual_seed(trial['sim_seed'])
-        kwargs = dict(sim_mode='mujoco', headless=True, render_hz=50)
+        kwargs = dict(sim_mode=sim_mode, headless=True, webrtc=False, render_hz=50)
         decoupled = trial['controller'] == 'decoupled'
         if decoupled:
             import decoupled_wbc
@@ -117,6 +123,18 @@ def run_trial(trial, output, host, port):
             env = StandStabilizationWrapper(env)
         env = gym.wrappers.TimeLimit(env, max_episode_steps=trial['max_steps'])
         raw = env.unwrapped
+        if 'isaac' in sim_mode:
+            import importlib.metadata
+            if raw.isaac is None or not raw.render_isaac:
+                raise RuntimeError('Isaac policy rendering is not enabled')
+            if decoupled:
+                # Isaac mirrors the completed control step; retain every MuJoCo
+                # physics substep without rendering its intermediate states.
+                raw.sync_isaac_every_substep = False
+            result['isaac_render_cadence'] = 'every_control_step'
+            result['isaac_sync_every_substep'] = getattr(raw, 'sync_isaac_every_substep', None)
+            result['isaacsim_version'] = importlib.metadata.version('isaacsim')
+        result.update(torch_version=torch.__version__, mujoco_version=mujoco.__version__)
         threshold = effective_threshold(raw.task, trial['env_id'])
         if threshold is None or not math.isclose(threshold, trial['success_criteria']):
             raise ValueError(f'Task threshold {threshold} != manifest {trial["success_criteria"]}')
@@ -127,8 +145,10 @@ def run_trial(trial, output, host, port):
                             **({'sonic_config': sonic_config} if decoupled else {}))
         # The synchronous official server cannot answer pings during cold GPU
         # inference. Keep a bounded heartbeat timeout without changing inference.
-        agent.client._ws.ping_timeout = 600
-        result['client_ping_timeout_seconds'] = 600
+        if hasattr(agent.client._ws, 'ping_timeout'):
+            agent.client._ws.ping_timeout = 600
+        # Isaac's websockets 12 sync client has no automatic heartbeat.
+        result['client_ping_timeout_seconds'] = getattr(agent.client._ws, 'ping_timeout', None)
         metadata = agent.client.get_server_metadata()
         write_json(output / 'server_metadata.json', metadata)
         if metadata.get('action_dim') != 36 or metadata.get('action_horizon') != 30:
@@ -145,6 +165,8 @@ def run_trial(trial, output, host, port):
             if first:
                 request['model_seed'] = trial['model_seed']
             image = np.asarray(request['observation/image'])
+            if not np.array_equal(image, obs['head_stereo_left']):
+                raise ValueError('Policy request does not match the live head camera')
             state = np.asarray(request['states'])
             if image.dtype != np.uint8 or image.ndim != 3 or image.shape[2] != 3:
                 raise ValueError(f'Invalid policy image: {image.shape} {image.dtype}')
@@ -209,12 +231,17 @@ def run_trial(trial, output, host, port):
         overview = mujoco.Renderer(sim.mjModel, height=480, width=640)
         camera = mujoco.MjvCamera()
         camera.distance, camera.azimuth, camera.elevation = 3.5, 135, -25
-        for name in ('head_stereo_left', 'overview'):
+        names = ['head_stereo_left', 'overview']
+        if 'isaac' in sim_mode and 'front_stereo_left' in obs:
+            names.append('front_stereo_left')
+        for name in names:
             writers[name] = imageio.get_writer(output / f'{name}.mp4', fps=50,
                                                codec='libx264', macro_block_size=1)
 
         def record_frame():
             writers['head_stereo_left'].append_data(obs['head_stereo_left'])
+            if 'front_stereo_left' in writers:
+                writers['front_stereo_left'].append_data(obs['front_stereo_left'])
             camera.lookat[:] = sim.mjData.qpos[:3] + np.array([.4, 0, -.1])
             overview.update_scene(sim.mjData, camera=camera)
             writers['overview'].append_data(overview.render())
@@ -257,7 +284,7 @@ def run_trial(trial, output, host, port):
     finally:
         # Persist evidence even if inference, rendering, or a controller fails.
         cleanup_errors = []
-        for resource in [*writers.values(), overview, getattr(getattr(agent, 'client', None), '_ws', None), env]:
+        for resource in [*writers.values(), overview, getattr(getattr(agent, 'client', None), '_ws', None)]:
             if resource is not None:
                 try:
                     resource.close()
@@ -277,6 +304,10 @@ def run_trial(trial, output, host, port):
             except Exception as error:
                 cleanup_errors.append(f'{name}.json: {error!r}')
         write_json(output / 'result.json', result)
+        # Kit shutdown can terminate its process. Persist all evidence first;
+        # the parent process owns suite accounting and the next trial.
+        if env is not None:
+            env.close()
         if cleanup_errors and result['outcome'] != 'error':
             result.update(outcome='error', error='Failed to close output resources')
             write_json(output / 'result.json', result)
@@ -290,16 +321,50 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8015)
+    parser.add_argument('--sim-mode', choices=('mujoco', 'mujoco_isaac'), default='mujoco')
+    parser.add_argument('--trial-index', type=int, help=argparse.SUPPRESS)
     args = parser.parse_args()
     trials = validate_manifest(json.loads(args.manifest.read_text()))
+    if args.trial_index is not None:
+        if not 0 <= args.trial_index < len(trials):
+            parser.error('trial-index is outside the manifest')
+        trial = trials[args.trial_index]
+        run_trial(trial, args.output / trial['trial_id'], args.host, args.port, args.sim_mode)
+        return
     args.output.mkdir(parents=True, exist_ok=False)
     write_json(args.output / 'manifest.json', trials)
     summary = {'status': 'running', 'requested': len(trials),
                'results': [{'trial_id': t['trial_id'], 'outcome': 'unrun'} for t in trials]}
     write_json(args.output / 'summary.json', summary)
+    def interrupted(signum, _frame):
+        raise SystemExit(f'Received signal {signum}')
+    signal.signal(signal.SIGTERM, interrupted)
     try:
         for index, trial in enumerate(trials):
-            summary['results'][index] = run_trial(trial, args.output / trial['trial_id'], args.host, args.port)
+            if args.sim_mode == 'mujoco_isaac':
+                # SimulationApp cannot be restarted safely inside one process.
+                command = [sys.executable, '-u', str(Path(__file__).resolve()),
+                           '--manifest', str(args.manifest), '--output', str(args.output),
+                           '--host', args.host, '--port', str(args.port),
+                           '--sim-mode', args.sim_mode, '--trial-index', str(index)]
+                child = subprocess.Popen(command)
+                try:
+                    if child.wait():
+                        raise RuntimeError(f'Isaac trial process exited: {child.returncode}')
+                finally:
+                    if child.poll() is None:
+                        child.terminate()
+                        try:
+                            child.wait(timeout=20)
+                        except subprocess.TimeoutExpired:
+                            child.kill()
+                            child.wait()
+                result = json.loads((args.output / trial['trial_id'] / 'result.json').read_text())
+                if result['outcome'] not in ('success', 'failure'):
+                    raise RuntimeError(f'Isaac trial did not complete: {result}')
+                summary['results'][index] = result
+            else:
+                summary['results'][index] = run_trial(trial, args.output / trial['trial_id'], args.host, args.port)
             write_json(args.output / 'summary.json', summary)
         summary['status'] = 'complete'
     except BaseException as error:
@@ -307,6 +372,9 @@ def main():
         result_path = args.output / trial['trial_id'] / 'result.json'
         summary['results'][index] = (json.loads(result_path.read_text()) if result_path.exists()
                                      else {'trial_id': trial['trial_id'], 'outcome': 'error', 'error': repr(error)})
+        # A crash during Kit shutdown is infrastructure failure even if the
+        # worker saved a policy result before exiting abnormally.
+        summary['results'][index].update(outcome='error', error=repr(error))
         raise
     finally:
         summary['completed'] = sum(r['outcome'] in ('success', 'failure') for r in summary['results'])

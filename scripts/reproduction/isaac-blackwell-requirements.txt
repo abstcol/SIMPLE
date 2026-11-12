@@ -24,3 +24,13 @@ wheel==0.45.1
 ninja==1.11.1.4
 tomli==2.2.1
 python-fcl==0.7.0.8
+# Frozen pi0.5 GR00T controller and client dependencies; retain Isaac's websockets pin.
+pin==2.7.0
+eigenpy==3.5.1
+cmeel-boost==1.83.0
+cmeel-urdfdom==3.1.1.1
+onnxruntime==1.20.1
+coloredlogs==15.0.1
+flatbuffers==25.9.23
+humanfriendly==10.0
+msgpack==1.2.4

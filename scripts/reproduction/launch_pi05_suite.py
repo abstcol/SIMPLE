@@ -34,6 +34,7 @@ def main():
         parser.add_argument(f'--{name}', type=Path, required=True)
     parser.add_argument('--port', type=int, default=8015)
     parser.add_argument('--tasks', nargs='+', help='Environment name suffixes; omitted means all six')
+    parser.add_argument('--sim-mode', choices=('mujoco', 'mujoco_isaac'), default='mujoco')
     args = parser.parse_args()
     args.output = args.output.resolve()
     summary = json.loads((args.manifests / 'summary.json').read_text())
@@ -41,6 +42,7 @@ def main():
     if args.tasks and set(args.tasks) - available:
         parser.error(f'Unknown tasks: {set(args.tasks) - available}')
     tasks = []
+    sim_python = ROOT / ('.venv-isaac/bin/python' if args.sim_mode == 'mujoco_isaac' else '.venv-sonic/bin/python')
     for item in summary['tasks']:
         name = item['env_id'].removeprefix('simple/')
         if args.tasks and name not in args.tasks:
@@ -49,7 +51,7 @@ def main():
         records = validate_manifest(json.loads(checked_read(manifest, item['manifest_sha256'])))
         checkpoint = (args.weights_root / records[0]['weight_task'] / 'model.safetensors').resolve()
         stats = (args.data_root / 'train' / name / 'meta/stats.json').resolve()
-        for path in (checkpoint, stats, ROOT / '.venv-pi05/bin/python', ROOT / '.venv-sonic/bin/python'):
+        for path in (checkpoint, stats, ROOT / '.venv-pi05/bin/python', sim_python):
             if not path.is_file():
                 raise FileNotFoundError(path)
         checked_read(stats, records[0]['metadata_source']['train_stats_sha256'])
@@ -57,8 +59,9 @@ def main():
         tasks.append({'task': name, 'status': 'unrun', 'server_command': [str(ROOT / '.venv-pi05/bin/python'), '-u',
                       str(SCRIPTS / 'serve_pi05.py'), '--checkpoint', str(checkpoint), '--stats', str(stats),
                       '--task', records[0]['weight_task'], '--port', str(args.port)],
-                      'eval_command': [str(ROOT / '.venv-sonic/bin/python'), '-u', str(SCRIPTS / 'run_pi05_suite.py'),
-                      '--manifest', str(manifest), '--output', str(folder / 'evaluations'), '--port', str(args.port)]})
+                      'eval_command': [str(sim_python), '-u', str(SCRIPTS / 'run_pi05_suite.py'),
+                      '--manifest', str(manifest), '--output', str(folder / 'evaluations'), '--port', str(args.port),
+                      '--sim-mode', args.sim_mode]})
     if not tasks:
         raise ValueError('No task manifests selected')
     # Refuse an occupied port without sending any request to an existing service.
@@ -78,10 +81,18 @@ def main():
     sim_path = ':'.join(str(ROOT / path) for path in ('src', 'third_party', 'third_party/GR00T-WholeBodyControl',
         'third_party/unitree_sdk2_python', source + '/openpi/openpi-client/src', '.tools/pi05-suite-deps',
         '.venv-pi05-eval/lib/python3.10/site-packages', '.venv/lib/python3.10/site-packages'))
+    if args.sim_mode == 'mujoco_isaac':
+        sim_path = ':'.join(str(ROOT / path) for path in ('src', 'third_party',
+            'third_party/GR00T-WholeBodyControl', 'third_party/unitree_sdk2_python',
+            source + '/openpi/openpi-client/src'))
+        for key, path in {'XDG_CACHE_HOME': 'isaac-runtime', 'XDG_DATA_HOME': 'isaac-data',
+                          'CUDA_CACHE_PATH': 'cuda-isaac', 'TORCH_EXTENSIONS_DIR': 'torch-extensions-isaac',
+                          'SIMPLE_ISAAC_PORTABLE_ROOT': 'isaac-kit'}.items():
+            common[key] = str(ROOT / '.cache' / path)
     base_env = {key: value for key, value in os.environ.items()
                 if key not in ('PYTHONHOME', 'PYTHONPATH', 'VIRTUAL_ENV', 'CONDA_PREFIX', 'TRANSFORMERS_CACHE')}
     state = {'git_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
-             'status': 'running', 'environment_overrides': common, 'server_pythonpath': server_path,
+             'status': 'running', 'sim_mode': args.sim_mode, 'environment_overrides': common, 'server_pythonpath': server_path,
              'sim_pythonpath': sim_path, 'tasks': tasks}
     args.output.mkdir(parents=True, exist_ok=False)
     signal.signal(signal.SIGTERM, interrupted)

@@ -124,6 +124,30 @@ class SuiteTest(unittest.TestCase):
                     suite.main()
                 self.assertEqual(run.call_count, 2)
 
+    def test_isaac_process_failure_is_not_counted_as_policy_success(self):
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            manifest, output = root / 'manifest.json', root / 'output'
+            manifest.write_text(json.dumps([trial(i) for i in range(2)]))
+
+            def start(command):
+                self.assertIn('--trial-index', command)
+                folder = output / 'trial_0'
+                folder.mkdir()
+                (folder / 'result.json').write_text(json.dumps(
+                    dict(trial_id='trial_0', outcome='success', success=True)))
+                return SimpleNamespace(wait=lambda: 1, poll=lambda: 1, returncode=1)
+
+            argv = ['suite', '--manifest', str(manifest), '--output', str(output),
+                    '--sim-mode', 'mujoco_isaac']
+            with patch('sys.argv', argv), patch.object(suite.subprocess, 'Popen', side_effect=start):
+                with self.assertRaisesRegex(RuntimeError, 'process exited'):
+                    suite.main()
+            summary = json.loads((output / 'summary.json').read_text())
+            self.assertEqual([r['outcome'] for r in summary['results']], ['error', 'unrun'])
+            self.assertEqual(summary['completed'], 0)
+            self.assertEqual(summary['successes'], 0)
+
 
 if __name__ == '__main__':
     unittest.main()
