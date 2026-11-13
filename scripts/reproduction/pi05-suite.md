@@ -169,3 +169,38 @@ diagnostic view and is explicitly identified as such in results. Per-query PNGs,
 image hashes and request/action records verify the closed loop. Report all 20
 trials per task; choose success/failure examples only from that frozen set. If a
 task has no success or no failure, report that instead of altering the protocol.
+
+### Reuse Kit and distribute independent batches
+
+`--isaac-session task` keeps one Kit application alive for a task. Each trial
+still creates fresh Task/Robot/controller instances and a new MuJoCo model. On
+close it stops the Isaac world, destroys camera render products, clears the World
+singleton and opens a new USD stage. Only the application and compiled runtime
+remain loaded; model history and seeds reset as before. The suite records its
+summary before final Kit shutdown. `--isaac-session trial` retains the original
+process-per-trial fallback. Both modes render every completed control step and
+save complete videos; unused MuJoCo policy cameras are rendered only in debug or
+MuJoCo mode, while the recorded MuJoCo overview remains available.
+
+`--gpu N` binds CUDA by the selected GPU UUID, chooses the corresponding Isaac
+and MuJoCo EGL device, limits Kit to eight CPU threads, isolates Kit's writable
+cache/data directories and defaults the model port to `8015 + N`. To use several
+GPUs, run separate launcher commands concurrently with disjoint `--tasks`, GPU
+indices and output directories; no distributed model service is needed:
+
+```bash
+# One independent worker; repeat with another GPU/task/output for concurrency.
+.venv-isaac/bin/python scripts/reproduction/launch_pi05_suite.py \
+  --sim-mode mujoco_isaac --isaac-session task --gpu 0 \
+  --manifests experiments/reproduction/pi05-isaac/pilot-manifests-v2 \
+  --data-root data/pi05-suite --weights-root data/checkpoints/pi05-suite \
+  --tasks G1WholebodyBendPickMP-v0 \
+  --output experiments/reproduction/pi05-isaac/persistent-pilot-gpu0
+```
+
+Validate repeated and changed initial conditions, input images, fresh stages,
+controller/reset state and GPU placement before long runs. Report measured batch
+wall time, including startup, separately from per-trial timing. WBC wall-clock
+interpolation remains a timing-dependent limitation; speed changes do not imply
+bitwise-identical trajectories. Keep optimization pilots separate from formal
+results and do not silently merge records from different execution versions.

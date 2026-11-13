@@ -237,11 +237,10 @@ class SonicLocoManipEnv(BaseDualSim):
 
     def _render_frame(self):
         self._emit_timing("render_readback_begin")
-        frame_mujoco = self.mujoco.render()
-
         if self.isaac and self.render_isaac:
             frame_isaac = self.isaac.render()
             if "debug" in self.task.metadata and self.task.metadata["debug"]:
+                frame_mujoco = self.mujoco.render()
                 # tile frame_mujoco and frame isaac together
                 frame_tiled = {}
                 for key, isaac_img in frame_isaac.items():
@@ -254,7 +253,7 @@ class SonicLocoManipEnv(BaseDualSim):
             else:
                 result = frame_isaac
         else:
-            result = frame_mujoco
+            result = self.mujoco.render()
         self._emit_timing("render_readback_end")
         return result
 

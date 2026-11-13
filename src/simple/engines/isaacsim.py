@@ -249,6 +249,19 @@ class IsaacSimSimulator(Simulator):
 
         self.is_isaac_reset = False
 
+    def release_stage(self) -> None:
+        """Discard scene/camera state without shutting down the owning Kit app."""
+        for camera in getattr(self, "cameras", {}).values():
+            camera.pause()
+        if hasattr(self, "world"):
+            self.world.stop()
+        for camera in getattr(self, "cameras", {}).values():
+            camera.destroy()
+        World.clear_instance()
+        # Opening a new stage also releases camera stage/timeline subscriptions.
+        if not omni.usd.get_context().new_stage():
+            raise RuntimeError("Failed to replace the Isaac stage between trials")
+
     def _config_isaac(self):
         success, result = omni.kit.commands.execute('ChangeSetting',
             path='/rtx/directLighting/sampledLighting/autoEnable', value=False

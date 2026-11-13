@@ -7,10 +7,13 @@ Physics seeds and model sampling seeds are separate. Existing outputs are never
 overwritten, and an infrastructure/interface error stops the suite explicitly.
 """
 import argparse
+from contextlib import nullcontext
 from copy import deepcopy
+import gc
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import random
 import signal
@@ -63,7 +66,12 @@ def rollout(step, raw, max_steps, trailing_steps):
     return success, termination
 
 
-def run_trial(trial, output, host, port, sim_mode='mujoco'):
+def task_isaac_session():
+    from simple.envs.base_dual_env import isaac_session
+    return isaac_session()
+
+
+def run_trial(trial, output, host, port, sim_mode='mujoco', isaac_session='trial'):
     import gymnasium as gym
     import imageio.v2 as imageio
     import mujoco
@@ -84,7 +92,8 @@ def run_trial(trial, output, host, port, sim_mode='mujoco'):
               'execution': 'closed_loop_inference',
               'policy_image_source': 'isaac' if 'isaac' in sim_mode else 'mujoco',
               'overview_image_source': 'mujoco',
-              'video_fps': 50, 'controller_recreated': True}
+              'video_fps': 50, 'controller_recreated': True,
+              'process_id': os.getpid(), 'isaac_session': isaac_session}
     writers, chunks, requests, telemetry, stabilization = {}, [], [], [], []
     commands, states = [], []
     env = agent = overview = None
@@ -196,12 +205,19 @@ def run_trial(trial, output, host, port, sim_mode='mujoco'):
                 record['wall_seconds'] = time.monotonic() - query_start
 
         agent.client.infer = recorded_infer
+        result['setup_seconds'] = time.monotonic() - start
+        reset_start = time.monotonic()
         obs, info = env.reset(seed=trial['sim_seed'], options={'state_dict': conf})
+        result['reset_seconds'] = time.monotonic() - reset_start
+        if raw.isaac is not None:
+            result['isaac_app_id'] = id(raw.simulation_app)
+            result['isaac_stage'] = raw.isaac.world.stage.GetRootLayer().identifier
         sim = raw.mujoco
         result['reset_state_stage'] = 'before_stabilization' if decoupled else 'after_amo_warmup'
         result['initial_state_stage'] = 'after_stabilization'
         np.savez(output / 'reset_state.npz', qpos=sim.mjData.qpos, qvel=sim.mjData.qvel)
         agent.reset()  # Official decoupled reset precedes the stabilization ramp.
+        stabilize_start = time.monotonic()
         if decoupled:
             agent._wbc_policy.lower_body_policy.use_policy_action = True
             while not raw.task.robot.stabilized and len(stabilization) < 300:
@@ -221,6 +237,7 @@ def run_trial(trial, output, host, port, sim_mode='mujoco'):
         else:
             result['stabilization_steps'] = 60
             result['robot_stabilized'] = None  # AMO uses a fixed warmup, no velocity gate.
+        result['stabilization_seconds'] = time.monotonic() - stabilize_start
         np.savez(output / 'initial_state.npz', qpos=sim.mjData.qpos, qvel=sim.mjData.qvel)
         result['instruction'] = raw.task.instruction
 
@@ -304,8 +321,8 @@ def run_trial(trial, output, host, port, sim_mode='mujoco'):
             except Exception as error:
                 cleanup_errors.append(f'{name}.json: {error!r}')
         write_json(output / 'result.json', result)
-        # Kit shutdown can terminate its process. Persist all evidence first;
-        # the parent process owns suite accounting and the next trial.
+        # Save evidence before releasing the stage. Task sessions defer Kit
+        # shutdown until the suite summary is saved; trial mode closes it here.
         if env is not None:
             env.close()
         if cleanup_errors and result['outcome'] != 'error':
@@ -322,8 +339,12 @@ def main():
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8015)
     parser.add_argument('--sim-mode', choices=('mujoco', 'mujoco_isaac'), default='mujoco')
+    parser.add_argument('--isaac-session', choices=('trial', 'task'), default='trial',
+                        help='Keep Kit alive per task while rebuilding every trial stage/controller')
     parser.add_argument('--trial-index', type=int, help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.isaac_session == 'task' and (args.sim_mode != 'mujoco_isaac' or args.trial_index is not None):
+        parser.error('--isaac-session task requires a complete Isaac task manifest')
     trials = validate_manifest(json.loads(args.manifest.read_text()))
     if args.trial_index is not None:
         if not 0 <= args.trial_index < len(trials):
@@ -331,6 +352,11 @@ def main():
         trial = trials[args.trial_index]
         run_trial(trial, args.output / trial['trial_id'], args.host, args.port, args.sim_mode)
         return
+    with task_isaac_session() if args.isaac_session == 'task' else nullcontext():
+        evaluate_manifest(args, trials)
+
+
+def evaluate_manifest(args, trials):
     args.output.mkdir(parents=True, exist_ok=False)
     write_json(args.output / 'manifest.json', trials)
     summary = {'status': 'running', 'requested': len(trials),
@@ -341,7 +367,7 @@ def main():
     signal.signal(signal.SIGTERM, interrupted)
     try:
         for index, trial in enumerate(trials):
-            if args.sim_mode == 'mujoco_isaac':
+            if args.sim_mode == 'mujoco_isaac' and args.isaac_session == 'trial':
                 # SimulationApp cannot be restarted safely inside one process.
                 command = [sys.executable, '-u', str(Path(__file__).resolve()),
                            '--manifest', str(args.manifest), '--output', str(args.output),
@@ -364,8 +390,11 @@ def main():
                     raise RuntimeError(f'Isaac trial did not complete: {result}')
                 summary['results'][index] = result
             else:
-                summary['results'][index] = run_trial(trial, args.output / trial['trial_id'], args.host, args.port)
+                summary['results'][index] = run_trial(trial, args.output / trial['trial_id'], args.host,
+                                                      args.port, args.sim_mode, args.isaac_session)
             write_json(args.output / 'summary.json', summary)
+            if args.isaac_session == 'task':
+                gc.collect()
         summary['status'] = 'complete'
     except BaseException as error:
         summary['status'] = 'error'

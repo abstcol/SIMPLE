@@ -103,6 +103,13 @@ def create_simulation_app(
         "height": height,
         "experience": experience,
     })
+    for variable, key, minimum in (("SIMPLE_ISAAC_GPU", "active_gpu", 0),
+                                   ("SIMPLE_ISAAC_CPU_THREADS", "limit_cpu_threads", 1)):
+        if variable in os.environ:
+            value = int(os.environ[variable])
+            if value < minimum:
+                raise ValueError(f"{variable} must be >= {minimum}")
+            sim_cfg[key] = value
     if extra_args:
         sim_cfg["extra_args"] = extra_args
 

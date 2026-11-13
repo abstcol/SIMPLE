@@ -1,12 +1,14 @@
 """Lightweight tests for scoring and fail-fast accounting; no simulator needed."""
 from copy import deepcopy
+from contextlib import contextmanager
+import ast
 import importlib.util
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import run_pi05_suite as suite
 
@@ -19,6 +21,74 @@ def trial(index=0):
 
 
 class SuiteTest(unittest.TestCase):
+    def test_task_session_persists_error_accounting_before_kit_shutdown(self):
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            manifest, output = root / 'manifest.json', root / 'output'
+            manifest.write_text(json.dumps([trial(i) for i in range(3)]))
+            closed = []
+
+            @contextmanager
+            def session():
+                try:
+                    yield
+                finally:
+                    saved = json.loads((output / 'summary.json').read_text())
+                    self.assertEqual([r['outcome'] for r in saved['results']], ['failure', 'error', 'unrun'])
+                    closed.append(True)
+
+            argv = ['suite', '--manifest', str(manifest), '--output', str(output),
+                    '--sim-mode', 'mujoco_isaac', '--isaac-session', 'task']
+            with patch('sys.argv', argv), patch.object(suite, 'task_isaac_session', session), \
+                    patch.object(suite.subprocess, 'Popen') as spawn, patch.object(suite, 'run_trial') as run:
+                run.side_effect = [dict(trial_id='trial_0', outcome='failure'), ValueError('reset failed')]
+                with self.assertRaisesRegex(ValueError, 'reset failed'):
+                    suite.main()
+                spawn.assert_not_called()
+                self.assertEqual(run.call_count, 2)
+                self.assertEqual(run.call_args.args[-2:], ('mujoco_isaac', 'task'))
+            self.assertEqual(closed, [True])
+
+    def test_session_clears_each_stage_and_closes_kit_once_on_error(self):
+        class Env:
+            def close(self):
+                pass
+
+        path = Path(__file__).resolve().parents[2] / 'src/simple/envs/base_dual_env.py'
+        spec = importlib.util.spec_from_file_location('isolated_dual_env', path)
+        module = importlib.util.module_from_spec(spec)
+        with patch.dict('sys.modules', {'gymnasium': SimpleNamespace(Env=Env),
+                                      'simple.tasks.registry': SimpleNamespace(TaskRegistry=object)}):
+            spec.loader.exec_module(module)
+        app = module._SIMULATION_APP = Mock()
+        env = module.BaseDualSim.__new__(module.BaseDualSim)
+        env.mujoco, env.isaac = Mock(), Mock()
+        with self.assertRaisesRegex(ValueError, 'trial failed'):
+            with module.isaac_session():
+                env.close()
+                env.close()
+                app.close.assert_not_called()
+                raise ValueError('trial failed')
+        self.assertEqual(env.isaac.release_stage.call_count, 2)
+        self.assertEqual(app.reset_render_settings.call_count, 2)
+        app.close.assert_called_once()
+        self.assertFalse(module._ISAAC_SESSION)
+
+    def test_isaac_observations_do_not_render_unused_mujoco_cameras(self):
+        root = Path(__file__).resolve().parents[2] / 'src/simple/envs'
+        for name in ('loco_manipulation.py', 'sonic_loco_manip.py'):
+            tree = ast.parse((root / name).read_text())
+            method = next(node for node in ast.walk(tree)
+                          if isinstance(node, ast.FunctionDef) and node.name == '_render_frame')
+            namespace = {}
+            exec(compile(ast.Module(body=[method], type_ignores=[]), str(root / name), 'exec'), namespace)
+            env = SimpleNamespace(mujoco=Mock(), isaac=Mock(), render_isaac=True,
+                                  task=SimpleNamespace(metadata={}), _emit_timing=Mock())
+            self.assertIs(namespace['_render_frame'](env), env.isaac.render.return_value)
+            env.mujoco.render.assert_not_called()
+            env.render_isaac = False
+            self.assertIs(namespace['_render_frame'](env), env.mujoco.render.return_value)
+
     def test_registry_clear_recreates_robot_history_without_unregistering_classes(self):
         path = Path(__file__).resolve().parents[2] / 'src/simple/core/registry.py'
         registry_spec = importlib.util.spec_from_file_location('isolated_registry', path)
