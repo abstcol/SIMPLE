@@ -253,14 +253,15 @@ class IsaacSimSimulator(Simulator):
         """Discard scene/camera state without shutting down the owning Kit app."""
         for camera in getattr(self, "cameras", {}).values():
             camera.pause()
-            # STOP invalidates SyntheticData nodes; detach while they are live.
-            camera.destroy()
         if hasattr(self, "world"):
             self.world.stop()
         World.clear_instance()
-        # Opening a new stage also releases camera stage/timeline subscriptions.
+        # Stage events clear SyntheticData graphs and camera subscriptions first.
+        # Detaching from the old live graph can encounter stale 5.1 node handles.
         if not omni.usd.get_context().new_stage():
             raise RuntimeError("Failed to replace the Isaac stage between trials")
+        for camera in getattr(self, "cameras", {}).values():
+            camera.destroy()
 
     def _config_isaac(self):
         success, result = omni.kit.commands.execute('ChangeSetting',
