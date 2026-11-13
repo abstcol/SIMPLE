@@ -10,7 +10,6 @@ import argparse
 from contextlib import nullcontext
 from copy import deepcopy
 import gc
-import hashlib
 import json
 import math
 import os
@@ -22,7 +21,7 @@ import sys
 import time
 import traceback
 
-from pi05_common import decode_environment_config, validate_manifest, write_json
+from pi05_common import decode_environment_config, sha256, validate_manifest, write_json
 
 
 def effective_threshold(task, env_id):
@@ -197,7 +196,7 @@ def run_trial(trial, output, host, port, sim_mode='mujoco', isaac_session='trial
             Image.fromarray(image).save(output / f'input_{len(requests):03d}.png')
             record = {'state': state.tolist(), 'prompt': request['prompt'],
                       'reset': first, 'model_seed': request.get('model_seed'),
-                      'image_sha256': hashlib.sha256(image.tobytes()).hexdigest(),
+                      'image_sha256': sha256(image.tobytes()),
                       'scored_step': result['scored_steps'],
                       'trailing_step': result['trailing_steps']}
             requests.append(record)

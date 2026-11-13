@@ -1,10 +1,12 @@
-# Six-task pi0.5 MuJoCo evaluation
+# Six-task pretrained pi0.5 evaluation
 
 Protocol: the ten published **Level 0 initial conditions × model seeds 0 and 1**,
 with simulation seed 0, for 20 trials per task (120 total). These are ten paired
-conditions, not twenty independent scenes. Use the original MuJoCo appearance;
-this suite has no gray-floor intervention and is not an Isaac-rendered evaluation.
-No training is required.
+conditions, not twenty independent scenes. No training is required.
+
+`--sim-mode mujoco` (default) uses MuJoCo physics and images; `--sim-mode mujoco_isaac`
+uses the same physics with live Isaac images. Keep the two modes in separate output
+directories. Neither mode applies the earlier pilot's gray-floor intervention.
 
 The entry points have one responsibility each:
 `prepare_pi05_suite.py` freezes manifests, `launch_pi05_suite.py` manages model
@@ -151,7 +153,7 @@ to a physical robot.
 ```bash
 source .env.isaac
 .venv-isaac/bin/python scripts/reproduction/launch_pi05_suite.py \
-  --sim-mode mujoco_isaac \
+  --sim-mode mujoco_isaac --isaac-session task --gpu 0 \
   --manifests experiments/reproduction/pi05-isaac/manifests \
   --data-root data/pi05-suite --weights-root data/checkpoints/pi05-suite \
   --output experiments/reproduction/pi05-isaac/formal-01
@@ -189,18 +191,9 @@ MuJoCo mode, while the recorded MuJoCo overview remains available.
 `--gpu N` binds CUDA by the selected GPU UUID, chooses the corresponding Isaac
 and MuJoCo EGL device, limits Kit to eight CPU threads, isolates Kit's writable
 cache/data directories and defaults the model port to `8015 + N`. To use several
-GPUs, run separate launcher commands concurrently with disjoint `--tasks`, GPU
-indices and output directories; no distributed model service is needed:
-
-```bash
-# One independent worker; repeat with another GPU/task/output for concurrency.
-.venv-isaac/bin/python scripts/reproduction/launch_pi05_suite.py \
-  --sim-mode mujoco_isaac --isaac-session task --gpu 0 \
-  --manifests experiments/reproduction/pi05-isaac/pilot-manifests-v2 \
-  --data-root data/pi05-suite --weights-root data/checkpoints/pi05-suite \
-  --tasks G1WholebodyBendPickMP-v0 \
-  --output experiments/reproduction/pi05-isaac/persistent-pilot-gpu0
-```
+GPUs, use the command above with disjoint `--tasks`, GPU indices and output
+directories. For a pilot, select the pilot manifests and a fresh pilot output;
+no distributed model service is needed.
 
 Validate repeated and changed initial conditions, input images, fresh stages,
 controller/reset state and GPU placement before long runs. Report measured batch

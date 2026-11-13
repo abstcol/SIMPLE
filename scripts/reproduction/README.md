@@ -4,7 +4,7 @@ Start with the guide for the experiment you want to run:
 
 | Purpose | Guide / entry point |
 |---|---|
-| Six-task pretrained pi0.5 evaluation | [pi05-suite.md](pi05-suite.md): prepare → launch → evaluate |
+| Six-task pretrained pi0.5 evaluation (MuJoCo or Isaac) | [pi05-suite.md](pi05-suite.md): prepare → launch → evaluate; optional persistent Isaac sessions and independent GPU workers |
 | G1 Isaac rendering on RTX 50-series | [isaac-blackwell.md](isaac-blackwell.md): `render_g1_isaac.py` |
 | Earlier BendPick floor-appearance pilot | [pi05.md](pi05.md): `run_pi05.py` |
 | G1 motion-planner demonstration or action replay | [G1 instructions](#g1-whole-body-bend-and-pick-pure-mujoco): `run_g1_bend_pick.py` |

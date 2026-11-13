@@ -3,12 +3,9 @@
 # -----------------------
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
 *.so
 
 # Python-generated files
-*.py[oc]
 build/
 dist/
 wheels/
@@ -30,6 +27,8 @@ wheels/
 coverage.xml
 htmlcov/
 pytest_cache/
+.pytest_cache/
+.ruff_cache/
 
 # -----------------------
 # OS junk files
@@ -93,14 +92,8 @@ MUJOCO_LOG.TXT
 .runtime-state/
 .robo-nix/
 
-# Reproduction diagnostics stay inside this project.
-.venv-probe/
+# Project-local runtimes and reproduction outputs.
+.venv*/
+.tools/
 .cache/
 experiments/reproduction/
-
-# Project-local MuJoCo runtime and CUDA toolkit.
-.venv/
-.tools/
-.venv-pi05/
-.venv-pi05-eval/
-.venv-isaac/
