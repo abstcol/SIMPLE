@@ -76,6 +76,25 @@ class name does not imply SONIC token control.
 
 ## Preparation and execution
 
+### Hand-gain diagnostic
+
+An AMO manifest trial may set `hand_profile` to `current` or `pre_nov9`.
+The latter restores only the named hand stiffness and software torque-limit
+entries from upstream `b75c6786` (before November 9), after stand stabilization.
+Both settings record actual parameters and `hands.npz`: hand targets/positions,
+velocities, commanded controls, actuator/joint forces, software saturation, and
+left/right hand-target contact counts and summed normal forces. Sampling is at
+the end of each 50-Hz control step, so brief substep contacts can be missed.
+Asset actuator limits are recorded and remain unchanged; higher software limits
+do not necessarily permit higher applied torque. Damping, stance, AMO history,
+gravity, feedback cadence and observations remain controlled by the same setup.
+
+For this comparison, use one GPU, `--isaac-session trial`, identical scenes/seeds,
+and predeclared alternating profile order. Keep the model service alive while
+each trial starts a fresh Isaac process. Compare initial states and input pixels;
+do not assume pixel repeatability from matching seeds. These diagnostic trials
+must not be mixed into the earlier formal success-rate estimate.
+
 ### Upstream version alignment (2026-11-13)
 
 Upstream `main@2c38755fe78140d3511a5ca0ebc0b1f20352ddd9` is merged.

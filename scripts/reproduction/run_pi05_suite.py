@@ -96,7 +96,7 @@ def run_trial(trial, output, host, port, sim_mode='mujoco', isaac_session='trial
               'physics_profile': physics_profile}
     writers, chunks, requests, telemetry, stabilization = {}, [], [], [], []
     commands, states = [], []
-    env = agent = overview = None
+    env = agent = overview = hand_diagnostics = None
     start = time.monotonic()
     try:
         random.seed(trial['sim_seed'])
@@ -267,6 +267,12 @@ def run_trial(trial, output, host, port, sim_mode='mujoco', isaac_session='trial
         result['stabilization_seconds'] = time.monotonic() - stabilize_start
         np.savez(output / 'initial_state.npz', qpos=sim.mjData.qpos, qvel=sim.mjData.qvel)
         result['instruction'] = raw.task.instruction
+        if 'hand_profile' in trial:
+            from hand_diagnostics import configure_hands, HandDiagnostics
+            result['hand_parameters'] = configure_hands(raw.task.robot, trial['hand_profile'])
+            hand_diagnostics = HandDiagnostics(raw.task.robot, sim.mjModel, sim.mjData,
+                                                sim.mj_objects['target'].id)
+            result['hand_diagnostics'] = hand_diagnostics.metadata()
 
         # Teleop guarantees only the head camera. A separate MuJoCo camera
         # records an overview without changing the policy observation or model.
@@ -304,6 +310,8 @@ def run_trial(trial, output, host, port, sim_mode='mujoco', isaac_session='trial
             # official tasks are stateful, and env.step already invokes both.
             if not np.isfinite(sim.mjData.qpos).all() or not np.isfinite(sim.mjData.qvel).all():
                 raise FloatingPointError('Nonfinite MuJoCo state')
+            if hand_diagnostics is not None:
+                hand_diagnostics.sample(len(telemetry) + 1)
             record_frame()
             telemetry.append({'step': len(telemetry) + 1, 'phase': phase,
                               'wall_seconds': time.monotonic() - tick,
@@ -343,6 +351,8 @@ def run_trial(trial, output, host, port, sim_mode='mujoco', isaac_session='trial
         result.update(wall_seconds=time.monotonic() - start, inference_count=len(requests),
                       video_frames=len(states), cleanup_errors=cleanup_errors)
         np.savez_compressed(output / 'actions.npz', **{f'chunk_{i}': a for i, a in enumerate(chunks)})
+        if hand_diagnostics is not None:
+            hand_diagnostics.save(output / 'hands.npz')
         if states:
             np.savez_compressed(output / 'states.npz', qpos=np.stack([s[0] for s in states]),
                                 qvel=np.stack([s[1] for s in states]))
