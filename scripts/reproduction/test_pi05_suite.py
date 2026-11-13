@@ -178,7 +178,8 @@ class SuiteTest(unittest.TestCase):
             root = Path(temp)
             manifest, output = root / 'manifest.json', root / 'output'
             manifest.write_text(json.dumps([trial(i) for i in range(3)]))
-            argv = ['suite', '--manifest', str(manifest), '--output', str(output)]
+            argv = ['suite', '--manifest', str(manifest), '--output', str(output),
+                    '--sim-mode', 'mujoco']
             with patch('sys.argv', argv), patch.object(suite, 'run_trial') as run:
                 run.side_effect = [dict(trial_id='trial_0', outcome='failure'),
                                    ValueError('bad checkpoint')]
@@ -202,14 +203,16 @@ class SuiteTest(unittest.TestCase):
 
             def start(command):
                 self.assertIn('--trial-index', command)
+                self.assertEqual(command[command.index('--sim-mode') + 1], 'mujoco_isaac')
+                self.assertEqual(command[command.index('--physics-profile') + 1], 'upstream')
                 folder = output / 'trial_0'
                 folder.mkdir()
                 (folder / 'result.json').write_text(json.dumps(
                     dict(trial_id='trial_0', outcome='success', success=True)))
                 return SimpleNamespace(wait=lambda: 1, poll=lambda: 1, returncode=1)
 
-            argv = ['suite', '--manifest', str(manifest), '--output', str(output),
-                    '--sim-mode', 'mujoco_isaac']
+            # Omitting options must still launch an Isaac worker with upstream physics.
+            argv = ['suite', '--manifest', str(manifest), '--output', str(output)]
             with patch('sys.argv', argv), patch.object(suite.subprocess, 'Popen', side_effect=start):
                 with self.assertRaisesRegex(RuntimeError, 'process exited'):
                     suite.main()
