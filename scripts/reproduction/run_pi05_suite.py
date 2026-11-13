@@ -150,6 +150,19 @@ def run_trial(trial, output, host, port, sim_mode='mujoco', isaac_session='trial
         result['effective_success_criteria'] = threshold
         result['task_success_attribute'] = getattr(raw.task, 'success_criteria', None)
         result['task_metadata'] = dict(raw.task.metadata)
+        # Do not hold a websocket open during potentially long USD/material loading.
+        result['setup_seconds'] = time.monotonic() - start
+        reset_start = time.monotonic()
+        obs, info = env.reset(seed=trial['sim_seed'], options={'state_dict': conf})
+        result['reset_seconds'] = time.monotonic() - reset_start
+        if raw.isaac is not None:
+            result['isaac_app_id'] = id(raw.simulation_app)
+            result['isaac_stage'] = raw.isaac.world.stage.GetRootLayer().identifier
+        sim = raw.mujoco
+        result['reset_state_stage'] = 'before_stabilization' if decoupled else 'after_amo_warmup'
+        result['initial_state_stage'] = 'after_stabilization'
+        np.savez(output / 'reset_state.npz', qpos=sim.mjData.qpos, qvel=sim.mjData.qvel)
+        agent_start = time.monotonic()
         agent = agent_class(raw.task.robot, host, port,
                             **({'sonic_config': sonic_config} if decoupled else {}))
         # The synchronous official server cannot answer pings during cold GPU
@@ -205,17 +218,7 @@ def run_trial(trial, output, host, port, sim_mode='mujoco', isaac_session='trial
                 record['wall_seconds'] = time.monotonic() - query_start
 
         agent.client.infer = recorded_infer
-        result['setup_seconds'] = time.monotonic() - start
-        reset_start = time.monotonic()
-        obs, info = env.reset(seed=trial['sim_seed'], options={'state_dict': conf})
-        result['reset_seconds'] = time.monotonic() - reset_start
-        if raw.isaac is not None:
-            result['isaac_app_id'] = id(raw.simulation_app)
-            result['isaac_stage'] = raw.isaac.world.stage.GetRootLayer().identifier
-        sim = raw.mujoco
-        result['reset_state_stage'] = 'before_stabilization' if decoupled else 'after_amo_warmup'
-        result['initial_state_stage'] = 'after_stabilization'
-        np.savez(output / 'reset_state.npz', qpos=sim.mjData.qpos, qvel=sim.mjData.qvel)
+        result['agent_setup_seconds'] = time.monotonic() - agent_start
         agent.reset()  # Official decoupled reset precedes the stabilization ramp.
         stabilize_start = time.monotonic()
         if decoupled:
