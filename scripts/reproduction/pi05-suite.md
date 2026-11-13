@@ -76,6 +76,28 @@ class name does not imply SONIC token control.
 
 ## Preparation and execution
 
+### Upstream version alignment (2026-11-13)
+
+Upstream `main@2c38755fe78140d3511a5ca0ebc0b1f20352ddd9` is merged.
+Since our previous base `da33553`, only documentation, ignore rules and Psi0
+sweep concurrency changed; no pi0.5 agent, task, controller or simulator code changed.
+Psi0 `1f1c307` likewise changes training scripts only relative to our `805fcda`
+runtime. The latest published BendPick eval zip still has SHA256 `8b11c499...914b2a`,
+identical to the frozen input. The model revision is unchanged. Updating those
+Git branches does not by itself resolve the observed success-rate gap.
+
+For a controlled comparison, pass `--physics-profile upstream` to the launcher
+or evaluator. This restores the two fork physics differences: upstream applies
+an extra downward object force even with global gravity enabled, and updates
+hand torque once per action rather than every MuJoCo substep. The default
+`project` preserves earlier runs and expert-motion behavior. Each result records
+the selected profile and actual object forces. Other inputs and scoring stay frozen.
+This is a physics comparison, not full upstream equivalence: Isaac 5.1 compatibility
+and session-reuse changes remain. Upstream main still pins Isaac 4.5/MuJoCo 3.3.6;
+the separate Isaac 6.2/MuJoCo 3.12 branch is a migration, not the paper environment.
+Checkpoint-specific normalization remains unpublished; do not replace it with
+the unrelated latest training statistics merely to raise the success rate.
+
 Keep weights in `data/checkpoints/pi05-suite/<weight_task>/model.safetensors` and
 metadata in `data/pi05-suite/{train,eval}/<environment_id_without_simple_prefix>`.
 Verify every weight against the frozen Hugging Face LFS SHA256 before running.

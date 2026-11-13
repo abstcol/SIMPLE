@@ -36,6 +36,7 @@ def main():
     parser.add_argument('--gpu', type=int, help='Physical nvidia-smi GPU index for this independent batch')
     parser.add_argument('--tasks', nargs='+', help='Environment name suffixes; omitted means all six')
     parser.add_argument('--sim-mode', choices=('mujoco', 'mujoco_isaac'), default='mujoco')
+    parser.add_argument('--physics-profile', choices=('project', 'upstream'), default='project')
     parser.add_argument('--isaac-session', choices=('trial', 'task'), default='trial')
     args = parser.parse_args()
     if args.gpu is not None and args.gpu < 0:
@@ -69,7 +70,8 @@ def main():
                       '--task', records[0]['weight_task'], '--port', str(args.port)],
                       'eval_command': [str(sim_python), '-u', str(SCRIPTS / 'run_pi05_suite.py'),
                       '--manifest', str(manifest), '--output', str(folder / 'evaluations'), '--port', str(args.port),
-                      '--sim-mode', args.sim_mode, '--isaac-session', args.isaac_session]})
+                      '--sim-mode', args.sim_mode, '--isaac-session', args.isaac_session,
+                      '--physics-profile', args.physics_profile]})
     if not tasks:
         raise ValueError('No task manifests selected')
     # Refuse an occupied port without sending any request to an existing service.
@@ -109,6 +111,7 @@ def main():
     base_env = {key: value for key, value in os.environ.items()
                 if key not in ('PYTHONHOME', 'PYTHONPATH', 'VIRTUAL_ENV', 'CONDA_PREFIX', 'TRANSFORMERS_CACHE')}
     state = {'git_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
+             'physics_profile': args.physics_profile,
              'status': 'running', 'sim_mode': args.sim_mode, 'isaac_session': args.isaac_session,
              'gpu': args.gpu, 'environment_overrides': common, 'server_pythonpath': server_path,
              'sim_pythonpath': sim_path, 'tasks': tasks}

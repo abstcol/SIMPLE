@@ -53,6 +53,7 @@ class MujocoSimulator(Simulator):
         self.headless=headless
         
         self.need_gravity = self.task.metadata.get("need_gravity", False)
+        self.upstream_object_gravity = False
         self._is_sonic = None
         self.articulated_object_joints = None
 
@@ -293,8 +294,9 @@ class MujocoSimulator(Simulator):
     def _apply_object_gravity(self, mj_obj, is_container=False):
         """Use synthetic object gravity only when global gravity is disabled."""
         mj_obj.xfrc_applied[:] = 0
-        if not self.need_gravity:
+        if not self.need_gravity or getattr(self, "upstream_object_gravity", False):
             # Preserve the legacy arm-only object's synthetic weight.
+            # Upstream also adds this force when global gravity is enabled.
             mj_obj.xfrc_applied[2] = -9.81 * (1.0 if is_container else 0.1)
 
     def _build_object(self, mjSpec, mjWorld, actor: ObjectActor):

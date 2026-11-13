@@ -70,7 +70,7 @@ def task_isaac_session():
     return isaac_session()
 
 
-def run_trial(trial, output, host, port, sim_mode='mujoco', isaac_session='trial'):
+def run_trial(trial, output, host, port, sim_mode='mujoco', isaac_session='trial', *, physics_profile='project'):
     import gymnasium as gym
     import imageio.v2 as imageio
     import mujoco
@@ -92,7 +92,8 @@ def run_trial(trial, output, host, port, sim_mode='mujoco', isaac_session='trial
               'policy_image_source': 'isaac' if 'isaac' in sim_mode else 'mujoco',
               'overview_image_source': 'mujoco',
               'video_fps': 50, 'controller_recreated': True,
-              'process_id': os.getpid(), 'isaac_session': isaac_session}
+              'process_id': os.getpid(), 'isaac_session': isaac_session,
+              'physics_profile': physics_profile}
     writers, chunks, requests, telemetry, stabilization = {}, [], [], [], []
     commands, states = [], []
     env = agent = overview = None
@@ -131,6 +132,10 @@ def run_trial(trial, output, host, port, sim_mode='mujoco', isaac_session='trial
             env = StandStabilizationWrapper(env)
         env = gym.wrappers.TimeLimit(env, max_episode_steps=trial['max_steps'])
         raw = env.unwrapped
+        # Match the two physics differences from upstream without changing the
+        # expert-replay defaults or the frozen task/scene/normalization inputs.
+        raw.mujoco.upstream_object_gravity = physics_profile == 'upstream'
+        raw.task.robot.refresh_hand_pd = physics_profile != 'upstream'
         if 'isaac' in sim_mode:
             import importlib.metadata
             if raw.isaac is None or not raw.render_isaac:
@@ -158,6 +163,8 @@ def run_trial(trial, output, host, port, sim_mode='mujoco', isaac_session='trial
             result['isaac_app_id'] = id(raw.simulation_app)
             result['isaac_stage'] = raw.isaac.world.stage.GetRootLayer().identifier
         sim = raw.mujoco
+        result['object_external_forces'] = {
+            name: body.xfrc_applied.copy() for name, body in sim.mj_objects.items()}
         result['reset_state_stage'] = 'before_stabilization' if decoupled else 'after_amo_warmup'
         result['initial_state_stage'] = 'after_stabilization'
         np.savez(output / 'reset_state.npz', qpos=sim.mjData.qpos, qvel=sim.mjData.qvel)
@@ -365,6 +372,8 @@ def main():
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8015)
     parser.add_argument('--sim-mode', choices=('mujoco', 'mujoco_isaac'), default='mujoco')
+    parser.add_argument('--physics-profile', choices=('project', 'upstream'), default='project',
+                        help='Upstream restores its object weight and hand-feedback cadence')
     parser.add_argument('--isaac-session', choices=('trial', 'task'), default='trial',
                         help='Keep Kit alive per task while rebuilding every trial stage/controller')
     parser.add_argument('--trial-index', type=int, help=argparse.SUPPRESS)
@@ -376,7 +385,8 @@ def main():
         if not 0 <= args.trial_index < len(trials):
             parser.error('trial-index is outside the manifest')
         trial = trials[args.trial_index]
-        run_trial(trial, args.output / trial['trial_id'], args.host, args.port, args.sim_mode)
+        run_trial(trial, args.output / trial['trial_id'], args.host, args.port, args.sim_mode,
+                  physics_profile=args.physics_profile)
         return
     with task_isaac_session() if args.isaac_session == 'task' else nullcontext():
         evaluate_manifest(args, trials)
@@ -398,7 +408,8 @@ def evaluate_manifest(args, trials):
                 command = [sys.executable, '-u', str(Path(__file__).resolve()),
                            '--manifest', str(args.manifest), '--output', str(args.output),
                            '--host', args.host, '--port', str(args.port),
-                           '--sim-mode', args.sim_mode, '--trial-index', str(index)]
+                           '--sim-mode', args.sim_mode, '--trial-index', str(index),
+                           '--physics-profile', args.physics_profile]
                 child = subprocess.Popen(command)
                 try:
                     if child.wait():
@@ -417,7 +428,8 @@ def evaluate_manifest(args, trials):
                 summary['results'][index] = result
             else:
                 summary['results'][index] = run_trial(trial, args.output / trial['trial_id'], args.host,
-                                                      args.port, args.sim_mode, args.isaac_session)
+                                                      args.port, args.sim_mode, args.isaac_session,
+                                                      physics_profile=args.physics_profile)
             write_json(args.output / 'summary.json', summary)
             if args.isaac_session == 'task':
                 gc.collect()
