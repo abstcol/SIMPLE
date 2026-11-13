@@ -32,10 +32,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('manifests', 'data-root', 'weights-root', 'output'):
         parser.add_argument(f'--{name}', type=Path, required=True)
-    parser.add_argument('--port', type=int, default=8015)
+    parser.add_argument('--port', type=int, help='Defaults to 8015 + GPU index')
+    parser.add_argument('--gpu', type=int, help='Physical nvidia-smi GPU index for this independent batch')
     parser.add_argument('--tasks', nargs='+', help='Environment name suffixes; omitted means all six')
     parser.add_argument('--sim-mode', choices=('mujoco', 'mujoco_isaac'), default='mujoco')
+    parser.add_argument('--isaac-session', choices=('trial', 'task'), default='trial')
     args = parser.parse_args()
+    if args.gpu is not None and args.gpu < 0:
+        parser.error('--gpu must be nonnegative')
+    if args.isaac_session == 'task' and args.sim_mode != 'mujoco_isaac':
+        parser.error('--isaac-session task requires --sim-mode mujoco_isaac')
+    if args.port is None:
+        args.port = 8015 + (args.gpu or 0)
     args.output = args.output.resolve()
     summary = json.loads((args.manifests / 'summary.json').read_text())
     available = {item['env_id'].removeprefix('simple/') for item in summary['tasks']}
@@ -61,7 +69,7 @@ def main():
                       '--task', records[0]['weight_task'], '--port', str(args.port)],
                       'eval_command': [str(sim_python), '-u', str(SCRIPTS / 'run_pi05_suite.py'),
                       '--manifest', str(manifest), '--output', str(folder / 'evaluations'), '--port', str(args.port),
-                      '--sim-mode', args.sim_mode]})
+                      '--sim-mode', args.sim_mode, '--isaac-session', args.isaac_session]})
     if not tasks:
         raise ValueError('No task manifests selected')
     # Refuse an occupied port without sending any request to an existing service.
@@ -70,6 +78,13 @@ def main():
     common = dict(MUJOCO_GL='egl', JAX_PLATFORMS='cpu', TORCH_COMPILE_DISABLE='1',
                   HF_HUB_OFFLINE='1', HF_DATASETS_OFFLINE='1', TRANSFORMERS_OFFLINE='1',
                   OMP_NUM_THREADS='4', OPENBLAS_NUM_THREADS='4', MKL_NUM_THREADS='4', TOKENIZERS_PARALLELISM='false')
+    if args.gpu is not None:
+        gpu_uuid = subprocess.check_output(['nvidia-smi', '-i', str(args.gpu), '--query-gpu=uuid',
+                                           '--format=csv,noheader'], text=True).strip()
+        if not gpu_uuid.startswith('GPU-') or '\n' in gpu_uuid:
+            raise ValueError(f'Expected one physical GPU, got {gpu_uuid!r}')
+        common.update(CUDA_VISIBLE_DEVICES=gpu_uuid, SIMPLE_ISAAC_GPU=str(args.gpu),
+                      MUJOCO_EGL_DEVICE_ID=str(args.gpu), SIMPLE_ISAAC_CPU_THREADS='8')
     for key, path in {'HF_HOME': 'huggingface', 'HF_HUB_CACHE': 'huggingface/hub',
                       'HUGGINGFACE_HUB_CACHE': 'huggingface/hub', 'HF_DATASETS_CACHE': 'huggingface/datasets',
                       'XDG_CACHE_HOME': 'runtime', 'TORCH_HOME': 'torch', 'OPENPI_DATA_HOME': 'openpi',
@@ -89,10 +104,14 @@ def main():
                           'CUDA_CACHE_PATH': 'cuda-isaac', 'TORCH_EXTENSIONS_DIR': 'torch-extensions-isaac',
                           'SIMPLE_ISAAC_PORTABLE_ROOT': 'isaac-kit'}.items():
             common[key] = str(ROOT / '.cache' / path)
+        if args.gpu is not None:
+            for key in ('XDG_CACHE_HOME', 'XDG_DATA_HOME', 'SIMPLE_ISAAC_PORTABLE_ROOT'):
+                common[key] = str(Path(common[key]) / f'gpu-{args.gpu}')
     base_env = {key: value for key, value in os.environ.items()
                 if key not in ('PYTHONHOME', 'PYTHONPATH', 'VIRTUAL_ENV', 'CONDA_PREFIX', 'TRANSFORMERS_CACHE')}
     state = {'git_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
-             'status': 'running', 'sim_mode': args.sim_mode, 'environment_overrides': common, 'server_pythonpath': server_path,
+             'status': 'running', 'sim_mode': args.sim_mode, 'isaac_session': args.isaac_session,
+             'gpu': args.gpu, 'environment_overrides': common, 'server_pythonpath': server_path,
              'sim_pythonpath': sim_path, 'tasks': tasks}
     args.output.mkdir(parents=True, exist_ok=False)
     signal.signal(signal.SIGTERM, interrupted)

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 from typing import TYPE_CHECKING
+from contextlib import contextmanager
 import time
 
 if TYPE_CHECKING:
@@ -15,6 +16,22 @@ from simple.tasks.registry import TaskRegistry
 
 _ISAAC_LOADED = False
 _SIMULATION_APP = None
+_ISAAC_SESSION = False
+
+
+@contextmanager
+def isaac_session():
+    """Keep Kit alive while each environment owns a fresh stage and controller."""
+    global _ISAAC_SESSION
+    if _ISAAC_SESSION:
+        raise RuntimeError("Isaac sessions cannot be nested")
+    _ISAAC_SESSION = True
+    try:
+        yield
+    finally:
+        _ISAAC_SESSION = False
+        if _SIMULATION_APP is not None:
+            _SIMULATION_APP.close()
 
 
 def _preload_native_runtime() -> None:
@@ -125,15 +142,10 @@ class BaseDualSim(gym.Env):
     
     def close(self):
         self.mujoco.close()
-        if _ISAAC_LOADED:
-            assert self.isaac is not None
-            """while (
-                "isaac" in self.sim_mode and
-                not self.headless and 
-                self.simulation_app.is_running() # type: ignore
-            ):
-                self.isaac.update_visuals()
-                self.simulation_app.update() # type: ignore"""
-            print("Closing IsaacSim simulator...")
-            _SIMULATION_APP.close()
+        if self.isaac is not None:
+            if _ISAAC_SESSION:
+                self.isaac.release_stage()
+                _SIMULATION_APP.reset_render_settings()
+            else:
+                _SIMULATION_APP.close()
         super().close()

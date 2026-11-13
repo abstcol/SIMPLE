@@ -249,6 +249,21 @@ class IsaacSimSimulator(Simulator):
 
         self.is_isaac_reset = False
 
+    def release_stage(self) -> None:
+        """Discard scene/camera state without shutting down the owning Kit app."""
+        for camera in getattr(self, "cameras", {}).values():
+            camera.pause()
+        if hasattr(self, "world"):
+            self.world.stop()
+        World.clear_instance()
+        # Stage events clear SyntheticData graphs and camera subscriptions first.
+        # Detaching from the old live graph can encounter stale 5.1 node handles.
+        if not omni.usd.get_context().new_stage():
+            raise RuntimeError("Failed to replace the Isaac stage between trials")
+        omni.kit.app.get_app().update()  # Dispatch stage events before releasing handles.
+        for camera in getattr(self, "cameras", {}).values():
+            camera.destroy()
+
     def _config_isaac(self):
         success, result = omni.kit.commands.execute('ChangeSetting',
             path='/rtx/directLighting/sampledLighting/autoEnable', value=False
@@ -344,7 +359,8 @@ class IsaacSimSimulator(Simulator):
         self.add_cameras()
         self.add_lights()
 
-        self.__pre_add_objects()
+        # update_layout loads the current actors on demand. Preloading the
+        # entire asset library also compiles materials for unused objects.
         self.spheres = None
 
     def __update_scene(self, move_surface_to_origin=True):
@@ -601,10 +617,6 @@ class IsaacSimSimulator(Simulator):
             xform.AddTranslateOp().Set(Gf.Vec3d(*[float(v) for v in pos]))
             xform.AddScaleOp().Set(Gf.Vec3f(*[float(v) for v in scale]))
             UsdShade.MaterialBindingAPI.Apply(cube.GetPrim()).Bind(material)
-
-    def __pre_add_objects(self):
-        for obj in self.task.preload_objects():
-            self.__create_object(obj.asset.label, obj)
 
     def __create_object(self, obj_key: str, object_info: ObjectActor):
         obj_id = object_info.uid # object_info["id"]

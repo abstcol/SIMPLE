@@ -158,8 +158,9 @@ source .env.isaac
 ```
 
 Copy the previously frozen manifests byte-for-byte; run separate pilots on the PR
-before merging and starting the formal suite. Each Isaac trial runs in a fresh
-process because Kit cannot restart after shutdown. The model service stays alive
+before merging and starting the formal suite. By default each Isaac trial runs
+in a fresh process because Kit cannot restart after shutdown; the task-session
+option below defers shutdown until the whole task is finished. The model service stays alive
 for the task, but history and sampling seed reset per trial. Shutdown errors stop
 the batch and are infrastructure errors, never policy failures.
 
@@ -169,3 +170,41 @@ diagnostic view and is explicitly identified as such in results. Per-query PNGs,
 image hashes and request/action records verify the closed loop. Report all 20
 trials per task; choose success/failure examples only from that frozen set. If a
 task has no success or no failure, report that instead of altering the protocol.
+
+### Reuse Kit and distribute independent batches
+
+`--isaac-session task` keeps one Kit application alive for a task. Each trial
+still creates fresh Task/Robot/controller instances and a new MuJoCo model. On
+close it pauses camera acquisition, stops the Isaac world, clears the World
+singleton, opens a new USD stage, then releases the old camera handles. Stage
+events release render graphs and subscriptions before handle cleanup. The application
+and runtime caches remain loaded; model history and seeds reset as before. The suite records its
+summary before final Kit shutdown. `--isaac-session trial` retains the original
+process-per-trial fallback. Scene setup loads current actors on demand instead
+of preloading and compiling materials for the entire object library.
+Both modes render every completed control step and
+save complete videos; unused MuJoCo policy cameras are rendered only in debug or
+MuJoCo mode, while the recorded MuJoCo overview remains available.
+
+`--gpu N` binds CUDA by the selected GPU UUID, chooses the corresponding Isaac
+and MuJoCo EGL device, limits Kit to eight CPU threads, isolates Kit's writable
+cache/data directories and defaults the model port to `8015 + N`. To use several
+GPUs, run separate launcher commands concurrently with disjoint `--tasks`, GPU
+indices and output directories; no distributed model service is needed:
+
+```bash
+# One independent worker; repeat with another GPU/task/output for concurrency.
+.venv-isaac/bin/python scripts/reproduction/launch_pi05_suite.py \
+  --sim-mode mujoco_isaac --isaac-session task --gpu 0 \
+  --manifests experiments/reproduction/pi05-isaac/pilot-manifests-v2 \
+  --data-root data/pi05-suite --weights-root data/checkpoints/pi05-suite \
+  --tasks G1WholebodyBendPickMP-v0 \
+  --output experiments/reproduction/pi05-isaac/persistent-pilot-gpu0
+```
+
+Validate repeated and changed initial conditions, input images, fresh stages,
+controller/reset state and GPU placement before long runs. Report measured batch
+wall time, including startup, separately from per-trial timing. WBC wall-clock
+interpolation remains a timing-dependent limitation; speed changes do not imply
+bitwise-identical trajectories. Keep optimization pilots separate from formal
+results and do not silently merge records from different execution versions.

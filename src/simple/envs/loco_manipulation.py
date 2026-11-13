@@ -111,11 +111,10 @@ class LocoManipulationEnv(BaseDualSim):
         return self._get_obs()
 
     def _render_frame(self):
-        frame_mujoco = self.mujoco.render()
-
         if self.isaac and self.render_isaac:
             frame_isaac = self.isaac.render()
             if "debug" in self.task.metadata and self.task.metadata["debug"]:
+                frame_mujoco = self.mujoco.render()
                 # tile frame_mujoco and frame isaac together
                 frame_tiled = {}
                 for key, isaac_img in frame_isaac.items():
@@ -128,7 +127,7 @@ class LocoManipulationEnv(BaseDualSim):
             else:
                 return frame_isaac
         else:
-            return frame_mujoco
+            return self.mujoco.render()
 
     def close(self):
         super().close()
