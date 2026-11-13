@@ -85,28 +85,27 @@ def main():
             raise ValueError(f'Expected one physical GPU, got {gpu_uuid!r}')
         common.update(CUDA_VISIBLE_DEVICES=gpu_uuid, SIMPLE_ISAAC_GPU=str(args.gpu),
                       MUJOCO_EGL_DEVICE_ID=str(args.gpu), SIMPLE_ISAAC_CPU_THREADS='8')
-    for key, path in {'HF_HOME': 'huggingface', 'HF_HUB_CACHE': 'huggingface/hub',
-                      'HUGGINGFACE_HUB_CACHE': 'huggingface/hub', 'HF_DATASETS_CACHE': 'huggingface/datasets',
-                      'XDG_CACHE_HOME': 'runtime', 'TORCH_HOME': 'torch', 'OPENPI_DATA_HOME': 'openpi',
-                      'TORCH_EXTENSIONS_DIR': 'torch-extensions', 'TORCHINDUCTOR_CACHE_DIR': 'torchinductor-pi05',
-                      'TRITON_CACHE_DIR': 'triton-pi05'}.items():
-        common[key] = str(ROOT / '.cache' / path)
+    cache_dirs = {'HF_HOME': 'huggingface', 'HF_HUB_CACHE': 'huggingface/hub',
+                  'HUGGINGFACE_HUB_CACHE': 'huggingface/hub', 'HF_DATASETS_CACHE': 'huggingface/datasets',
+                  'XDG_CACHE_HOME': 'runtime', 'TORCH_HOME': 'torch', 'OPENPI_DATA_HOME': 'openpi',
+                  'TORCH_EXTENSIONS_DIR': 'torch-extensions', 'TORCHINDUCTOR_CACHE_DIR': 'torchinductor-pi05',
+                  'TRITON_CACHE_DIR': 'triton-pi05'}
     source = '.tools/psi0-source/Psi0/src'
     server_path = ':'.join(str(ROOT / path) for path in (source, source + '/openpi/openpi-client/src'))
-    sim_path = ':'.join(str(ROOT / path) for path in ('src', 'third_party', 'third_party/GR00T-WholeBodyControl',
-        'third_party/unitree_sdk2_python', source + '/openpi/openpi-client/src', '.tools/pi05-suite-deps',
-        '.venv-pi05-eval/lib/python3.10/site-packages', '.venv/lib/python3.10/site-packages'))
+    sim_paths = ['src', 'third_party', 'third_party/GR00T-WholeBodyControl',
+                 'third_party/unitree_sdk2_python', source + '/openpi/openpi-client/src']
     if args.sim_mode == 'mujoco_isaac':
-        sim_path = ':'.join(str(ROOT / path) for path in ('src', 'third_party',
-            'third_party/GR00T-WholeBodyControl', 'third_party/unitree_sdk2_python',
-            source + '/openpi/openpi-client/src'))
-        for key, path in {'XDG_CACHE_HOME': 'isaac-runtime', 'XDG_DATA_HOME': 'isaac-data',
-                          'CUDA_CACHE_PATH': 'cuda-isaac', 'TORCH_EXTENSIONS_DIR': 'torch-extensions-isaac',
-                          'SIMPLE_ISAAC_PORTABLE_ROOT': 'isaac-kit'}.items():
-            common[key] = str(ROOT / '.cache' / path)
+        cache_dirs.update({'XDG_CACHE_HOME': 'isaac-runtime', 'XDG_DATA_HOME': 'isaac-data',
+                           'CUDA_CACHE_PATH': 'cuda-isaac', 'TORCH_EXTENSIONS_DIR': 'torch-extensions-isaac',
+                           'SIMPLE_ISAAC_PORTABLE_ROOT': 'isaac-kit'})
         if args.gpu is not None:
             for key in ('XDG_CACHE_HOME', 'XDG_DATA_HOME', 'SIMPLE_ISAAC_PORTABLE_ROOT'):
-                common[key] = str(Path(common[key]) / f'gpu-{args.gpu}')
+                cache_dirs[key] += f'/gpu-{args.gpu}'
+    else:
+        sim_paths += ['.tools/pi05-suite-deps', '.venv-pi05-eval/lib/python3.10/site-packages',
+                      '.venv/lib/python3.10/site-packages']
+    sim_path = ':'.join(str(ROOT / path) for path in sim_paths)
+    common.update({key: str(ROOT / '.cache' / path) for key, path in cache_dirs.items()})
     base_env = {key: value for key, value in os.environ.items()
                 if key not in ('PYTHONHOME', 'PYTHONPATH', 'VIRTUAL_ENV', 'CONDA_PREFIX', 'TRANSFORMERS_CACHE')}
     state = {'git_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),

@@ -7,7 +7,7 @@
 [![Documentation](https://img.shields.io/badge/Documentation-a)](https://psi-lab.ai/SIMPLE/docs/)
 [![Model](https://img.shields.io/badge/Hugging%20Face-Model-yellow)](https://huggingface.co/collections/USC-PSI-Lab/simple)
 [![Data](https://img.shields.io/badge/Hugging%20Face-Data-pink)](https://huggingface.co/collections/USC-PSI-Lab/simple)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](./license.md)
 
 </div>
 
@@ -19,7 +19,8 @@
 
 Contributors: [Songlin Wei](https://songlin.github.io/)\*, [Zhenhao Ni](https://nizhenhao-3.github.io/)\*, [Jie Liu](https://jie0530.github.io/)\*, [Zhenyu Zhao](https://zhenyuzhao.com/)\*, [Junjie Ye](https://junjieye.com/), [Hongyi Jing](https://hongyijing.me/), Junkai Xia, [Xiawei Liu](https://www.xiaweiliu.com/), [Michael Leong](https://leongmichael.github.io/), [Liang Heng](https://liangheng121.github.io/), Di Huang, [Yue Wang](https://yuewang.xyz/)†
 
-> 
+> For this fork's reproduction workflow, start with [reproduction tools](scripts/reproduction/README.md).
+> The [six-task pi0.5 guide](scripts/reproduction/pi05-suite.md) covers MuJoCo and Isaac closed-loop evaluation, including persistent Isaac sessions and independent GPU workers.
 
 
 ## 📢 News & Updates

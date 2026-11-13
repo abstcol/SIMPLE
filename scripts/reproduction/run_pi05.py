@@ -1,6 +1,5 @@
 """Paired MuJoCo trials using the official pi0.5 agent and BendPick/AMO task."""
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import random
@@ -16,7 +15,7 @@ import simple.envs
 from simple.baselines.pi05 import Pi05Agent
 from simple.envs.wrappers import StandStabilizationWrapper
 
-from pi05_common import decode_environment_config
+from pi05_common import decode_environment_config, sha256
 
 
 def trial(args, episode, variant):
@@ -56,7 +55,7 @@ def trial(args, episode, variant):
             chunks.append(action.copy())
             requests.append({'state': np.asarray(request['states']).tolist(),
                              'prompt': request['prompt'], 'reset': request['reset'],
-                             'image_sha256': hashlib.sha256(image.tobytes()).hexdigest(),
+                             'image_sha256': sha256(image.tobytes()),
                              'server_timing': response.get('server_timing')})
             return response
 
