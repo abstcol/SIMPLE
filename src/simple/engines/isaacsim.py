@@ -260,6 +260,7 @@ class IsaacSimSimulator(Simulator):
         # Detaching from the old live graph can encounter stale 5.1 node handles.
         if not omni.usd.get_context().new_stage():
             raise RuntimeError("Failed to replace the Isaac stage between trials")
+        omni.kit.app.get_app().update()  # Dispatch stage events before releasing handles.
         for camera in getattr(self, "cameras", {}).values():
             camera.destroy()
 

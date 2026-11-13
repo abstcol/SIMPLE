@@ -158,8 +158,9 @@ source .env.isaac
 ```
 
 Copy the previously frozen manifests byte-for-byte; run separate pilots on the PR
-before merging and starting the formal suite. Each Isaac trial runs in a fresh
-process because Kit cannot restart after shutdown. The model service stays alive
+before merging and starting the formal suite. By default each Isaac trial runs
+in a fresh process because Kit cannot restart after shutdown; the task-session
+option below defers shutdown until the whole task is finished. The model service stays alive
 for the task, but history and sampling seed reset per trial. Shutdown errors stop
 the batch and are infrastructure errors, never policy failures.
 
@@ -174,9 +175,10 @@ task has no success or no failure, report that instead of altering the protocol.
 
 `--isaac-session task` keeps one Kit application alive for a task. Each trial
 still creates fresh Task/Robot/controller instances and a new MuJoCo model. On
-close it stops the Isaac world, destroys camera render products, clears the World
-singleton and opens a new USD stage. Only the application and compiled runtime
-remain loaded; model history and seeds reset as before. The suite records its
+close it pauses camera acquisition, stops the Isaac world, clears the World
+singleton, opens a new USD stage, then releases the old camera handles. Stage
+events release render graphs and subscriptions before handle cleanup. The application
+and runtime caches remain loaded; model history and seeds reset as before. The suite records its
 summary before final Kit shutdown. `--isaac-session trial` retains the original
 process-per-trial fallback. Scene setup loads current actors on demand instead
 of preloading and compiling materials for the entire object library.
