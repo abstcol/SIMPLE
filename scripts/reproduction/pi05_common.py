@@ -30,6 +30,9 @@ def validate_manifest(records):
             raise ValueError(f'{name}: seed is out of range')
         if trial['controller'] not in ('amo', 'decoupled'):
             raise ValueError(f'{name}: unsupported controller')
+        if 'hand_profile' in trial and (trial['hand_profile'] not in ('current', 'pre_nov9')
+                                        or trial['controller'] != 'amo'):
+            raise ValueError(f'{name}: hand_profile requires current/pre_nov9 and AMO')
         if not isinstance(trial['env_id'], str) or not trial['env_id'].startswith('simple/'):
             raise ValueError(f'{name}: expected a registered simple/ environment')
         threshold = trial['success_criteria']
