@@ -314,7 +314,7 @@ class G1Wholebody(CuRoboMixin,Humanoid,Robot,HeadCamMountable,HasDexterousHand):
             # Hand motors need feedback during locomotion as well as arm actions.
             # Otherwise height_adjust/stand retain the last grasp torque indefinitely,
             # driving fingers past their target and releasing the object during lift.
-            if not replay and self.target_hand_qpos:
+            if not replay and self.target_hand_qpos and getattr(self, "refresh_hand_pd", True):
                 for joint_name, target_q in self.target_hand_qpos.items():
                     joint_index = self.joints_names.index(joint_name)
                     self.actuators[joint_name].ctrl = self.pd_control(

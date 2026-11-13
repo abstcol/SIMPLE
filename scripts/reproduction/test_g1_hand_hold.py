@@ -10,7 +10,8 @@ from simple.robots.controllers.combo import WholeBodyEEFController
 
 
 @pytest.mark.parametrize('replay', [False, True])
-def test_locomotion_refreshes_hand_pd_but_preserves_replay_torque(monkeypatch, replay):
+@pytest.mark.parametrize('refresh_hand_pd', [False, True])
+def test_hand_feedback_cadence_and_replay_torque(monkeypatch, replay, refresh_hand_pd):
     model = mujoco.MjModel.from_xml_string('''<mujoco>
       <option timestep="0.002" gravity="0 0 0"/>
       <worldbody><body><joint name="finger" type="hinge"/>
@@ -26,6 +27,7 @@ def test_locomotion_refreshes_hand_pd_but_preserves_replay_torque(monkeypatch, r
         joints_names=['finger'], mjdata=data, mjmodel=model,
         stiffness=[5.], damping=[1.], torque_limits=[.7],
         target_hand_qpos={'finger': .05}, target_waist_qpos=None,
+        refresh_hand_pd=refresh_hand_pd,
         pd_target=np.empty(0), output_joint_names=[], count=0,
         command=[0., 0., 0., -.3, 0., 0., 0., 0.],
     )
@@ -45,7 +47,7 @@ def test_locomotion_refreshes_hand_pd_but_preserves_replay_torque(monkeypatch, r
     G1Wholebody.step(robot, robot.command, replay=replay)
     assert len(controls) == 10
     assert data.qpos[0] > 0
-    if replay:
+    if replay or not refresh_hand_pd:
         assert controls == [.123] * 10
     else:
         assert controls[0] == pytest.approx(.25)
