@@ -1,5 +1,5 @@
 # SIMPLE/AMO dependencies alongside Isaac Sim 5.1's pinned Python packages.
-# Keep matplotlib/trimesh at Isaac's versions; do not overlay probe-requirements.txt.
+# Keep matplotlib/trimesh at Isaac's versions; use a separate model environment.
 numpy==1.26.0
 chardet==5.2.0
 mujoco==3.3.6

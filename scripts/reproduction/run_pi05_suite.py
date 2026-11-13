@@ -70,7 +70,7 @@ def task_isaac_session():
     return isaac_session()
 
 
-def run_trial(trial, output, host, port, sim_mode='mujoco', isaac_session='trial', *, physics_profile='project'):
+def run_trial(trial, output, host, port, sim_mode='mujoco_isaac', isaac_session='trial', *, physics_profile='upstream'):
     import gymnasium as gym
     import imageio.v2 as imageio
     import mujoco
@@ -381,8 +381,8 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8015)
-    parser.add_argument('--sim-mode', choices=('mujoco', 'mujoco_isaac'), default='mujoco')
-    parser.add_argument('--physics-profile', choices=('project', 'upstream'), default='project',
+    parser.add_argument('--sim-mode', choices=('mujoco', 'mujoco_isaac'), default='mujoco_isaac')
+    parser.add_argument('--physics-profile', choices=('project', 'upstream'), default='upstream',
                         help='Upstream restores its object weight and hand-feedback cadence')
     parser.add_argument('--isaac-session', choices=('trial', 'task'), default='trial',
                         help='Keep Kit alive per task while rebuilding every trial stage/controller')

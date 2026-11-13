@@ -35,8 +35,10 @@ def main():
     parser.add_argument('--port', type=int, help='Defaults to 8015 + GPU index')
     parser.add_argument('--gpu', type=int, help='Physical nvidia-smi GPU index for this independent batch')
     parser.add_argument('--tasks', nargs='+', help='Environment name suffixes; omitted means all six')
-    parser.add_argument('--sim-mode', choices=('mujoco', 'mujoco_isaac'), default='mujoco')
-    parser.add_argument('--physics-profile', choices=('project', 'upstream'), default='project')
+    parser.add_argument('--sim-mode', choices=('mujoco', 'mujoco_isaac'), default='mujoco_isaac',
+                        help='Isaac policy images by default; MuJoCo images are diagnostic only')
+    parser.add_argument('--physics-profile', choices=('project', 'upstream'), default='upstream',
+                        help='Use upstream physics; project reproduces the earlier fork behavior')
     parser.add_argument('--isaac-session', choices=('trial', 'task'), default='trial')
     args = parser.parse_args()
     if args.gpu is not None and args.gpu < 0:
@@ -51,7 +53,8 @@ def main():
     if args.tasks and set(args.tasks) - available:
         parser.error(f'Unknown tasks: {set(args.tasks) - available}')
     tasks = []
-    sim_python = ROOT / ('.venv-isaac/bin/python' if args.sim_mode == 'mujoco_isaac' else '.venv-sonic/bin/python')
+    # Both image modes use one simulator environment; never mix old site-packages.
+    sim_python = ROOT / '.venv-isaac/bin/python'
     for item in summary['tasks']:
         name = item['env_id'].removeprefix('simple/')
         if args.tasks and name not in args.tasks:
@@ -103,9 +106,6 @@ def main():
         if args.gpu is not None:
             for key in ('XDG_CACHE_HOME', 'XDG_DATA_HOME', 'SIMPLE_ISAAC_PORTABLE_ROOT'):
                 cache_dirs[key] += f'/gpu-{args.gpu}'
-    else:
-        sim_paths += ['.tools/pi05-suite-deps', '.venv-pi05-eval/lib/python3.10/site-packages',
-                      '.venv/lib/python3.10/site-packages']
     sim_path = ':'.join(str(ROOT / path) for path in sim_paths)
     common.update({key: str(ROOT / '.cache' / path) for key, path in cache_dirs.items()})
     base_env = {key: value for key, value in os.environ.items()

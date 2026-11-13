@@ -1,6 +1,7 @@
-# PyTorch inference; JAX is CPU-only for transforms, never installs CUDA 12.
-torch==2.7.1+cu118
-torchvision==0.22.1+cu118
+# RTX 50-series model service. Install separately from Isaac Sim (see setup guide).
+# JAX is CPU-only for transforms; PyTorch runs inference on CUDA 12.8.
+torch==2.7.0+cu128
+torchvision==0.22.0+cu128
 transformers==4.53.2
 numpy==1.26.4
 jax==0.5.3
@@ -15,7 +16,7 @@ numpydantic==1.6.9
 sentencepiece==0.2.0
 safetensors
 einops
-websockets>=14,<16
+websockets==15.0.1
 msgpack
 etils[epath]
 tqdm-loggable
