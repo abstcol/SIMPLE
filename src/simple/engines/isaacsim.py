@@ -357,7 +357,8 @@ class IsaacSimSimulator(Simulator):
         self.add_cameras()
         self.add_lights()
 
-        self.__pre_add_objects()
+        # update_layout loads the current actors on demand. Preloading the
+        # entire asset library also compiles materials for unused objects.
         self.spheres = None
 
     def __update_scene(self, move_surface_to_origin=True):
@@ -614,10 +615,6 @@ class IsaacSimSimulator(Simulator):
             xform.AddTranslateOp().Set(Gf.Vec3d(*[float(v) for v in pos]))
             xform.AddScaleOp().Set(Gf.Vec3f(*[float(v) for v in scale]))
             UsdShade.MaterialBindingAPI.Apply(cube.GetPrim()).Bind(material)
-
-    def __pre_add_objects(self):
-        for obj in self.task.preload_objects():
-            self.__create_object(obj.asset.label, obj)
 
     def __create_object(self, obj_key: str, object_info: ObjectActor):
         obj_id = object_info.uid # object_info["id"]

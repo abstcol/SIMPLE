@@ -178,7 +178,9 @@ close it stops the Isaac world, destroys camera render products, clears the Worl
 singleton and opens a new USD stage. Only the application and compiled runtime
 remain loaded; model history and seeds reset as before. The suite records its
 summary before final Kit shutdown. `--isaac-session trial` retains the original
-process-per-trial fallback. Both modes render every completed control step and
+process-per-trial fallback. Scene setup loads current actors on demand instead
+of preloading and compiling materials for the entire object library.
+Both modes render every completed control step and
 save complete videos; unused MuJoCo policy cameras are rendered only in debug or
 MuJoCo mode, while the recorded MuJoCo overview remains available.
 
