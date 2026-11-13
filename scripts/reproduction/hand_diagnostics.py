@@ -16,7 +16,7 @@ def configure_hands(robot, profile):
         # Exact hand entries from PRE_NOV9_COMMIT, not a historical robot rollback.
         robot.stiffness[indices] = [80, 40, 40, 60, 40, 40, 40] * 2
         robot.torque_limits[indices] = [5, 5, 3, 5, 3, 5, 3] * 2
-    return dict(profile=profile, reference_commit=PRE_NOV9_COMMIT, joint_names=HAND_NAMES,
+    return dict(profile=profile, historical_reference_commit=PRE_NOV9_COMMIT, joint_names=HAND_NAMES,
                 stiffness=robot.stiffness[indices].copy(), damping=robot.damping[indices].copy(),
                 software_torque_limits=robot.torque_limits[indices].copy(),
                 applied_after_stabilization=True)
