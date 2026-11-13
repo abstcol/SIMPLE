@@ -406,7 +406,7 @@ def evaluate_manifest(args, trials):
                                      else {'trial_id': trial['trial_id'], 'outcome': 'error', 'error': repr(error)})
         # A crash during Kit shutdown is infrastructure failure even if the
         # worker saved a policy result before exiting abnormally.
-        summary['results'][index].update(outcome='error', error=repr(error))
+        summary['results'][index].update(outcome='error', error=repr(error), traceback=traceback.format_exc())
         raise
     finally:
         summary['completed'] = sum(r['outcome'] in ('success', 'failure') for r in summary['results'])

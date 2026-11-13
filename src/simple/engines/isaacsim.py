@@ -253,10 +253,10 @@ class IsaacSimSimulator(Simulator):
         """Discard scene/camera state without shutting down the owning Kit app."""
         for camera in getattr(self, "cameras", {}).values():
             camera.pause()
+            # STOP invalidates SyntheticData nodes; detach while they are live.
+            camera.destroy()
         if hasattr(self, "world"):
             self.world.stop()
-        for camera in getattr(self, "cameras", {}).values():
-            camera.destroy()
         World.clear_instance()
         # Opening a new stage also releases camera stage/timeline subscriptions.
         if not omni.usd.get_context().new_stage():
