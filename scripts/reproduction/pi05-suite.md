@@ -19,6 +19,9 @@ normalization statistics, each task's controller, step budget and success rule.
 The model architecture/transforms are unchanged. Each checkpoint uses its own
 published training `meta/stats.json`; checkpoint-specific statistics are not
 published, so equivalence to the authors' training normalization remains unverified.
+The server records the statistics hash, which the evaluator checks against the
+manifest before inference. It also checks the live Isaac camera intrinsics and
+image dimensions against the task camera.
 
 | Checkpoint/task | Controller | Steps | Official success |
 |---|---|---:|---|
@@ -28,6 +31,37 @@ published, so equivalence to the authors' training normalization remains unverif
 | XMoveBendPickTeleop | GR00T Balance/Walk | 800 | 8 cm lift |
 | HandoverTeleop | GR00T Balance/Walk | 800 | accumulated target/container contact |
 | LocomotionPickBetweenTablesTeleop | GR00T Balance/Walk | 1200 | accumulated container contact without hand contact |
+
+### BendPick comparison with the paper
+
+The [paper's single-task Table 1](https://arxiv.org/html/2606.08278v2#S4.T1)
+reports pi0.5 BendPick Level 0 as 10/10. Its Table 7 describes a lift above 5 cm,
+whereas the released task and `simple.cli.eval` default to reward >= 0.9 with
+a 0.1-m lift scale (9 cm above the initial target height). Keep that executable
+stopping rule; each BendPick result additionally records `lift_scores.paper_5cm`
+when the scored trajectory exceeds 5 cm relative to the same initial height.
+This is a secondary interpretation of the paper's prose, not a verified copy of
+the authors' unpublished evaluation command. It does not stop a trial early.
+Do not combine single-task results with the paper's separate multi-task table.
+
+The [official pi0.5 guide](https://github.com/physical-superintelligence-lab/Psi0/blob/805fcda9c9654e272be2a6673fe5290944fcfb04/baselines/pi05/README.md)
+allows either recomputing normalization or rewriting published training statistics.
+We use its latter route, with the frozen `c8258285d134d0da644fdbf1a304988398fc3819`
+dataset revision. On 2026-11-12 the data repository replaced the old 100-episode
+BendPick archive with a 91-episode decoupled-WBC version and different statistics;
+the pi0.5 weight remained unchanged. Do not mix those new statistics into this
+old checkpoint's baseline. The weight directory contains only `model.safetensors`,
+so checkpoint-specific normalization equivalence remains unresolved.
+
+The released task-specific model config is 36 actions, horizon 30, token limit
+250, quantile normalization and 224x224 aspect-preserving padded RGB images.
+Only `head_stereo_left` is active; wrist image slots are zero-filled and masked.
+The task supplies 640x360 RGB at 50 Hz, with its original camera pose, 110-degree
+horizontal field of view, scene, materials and lights. No crop, flip, texture
+replacement or task-dependent normalization fitting is added. The paper appendix
+mentions horizon 16 generically; the task-specific released config specifies 30.
+Isaac 5.1 remains necessary for this Blackwell deployment, so it is not a claim of
+pixel equivalence to official Isaac 4.5. See [isaac-blackwell.md](isaac-blackwell.md).
 
 Lift criteria do not require sustained holding. Contact rewards are stateful; the
 runner adds no extra reward/success calls. A decoupled success receives the official
