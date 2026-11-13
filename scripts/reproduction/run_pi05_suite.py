@@ -176,6 +176,21 @@ def run_trial(trial, output, host, port, sim_mode='mujoco', isaac_session='trial
             raise ValueError(f'Unexpected model action contract: {metadata}')
         if trial.get('weight_task') and metadata.get('task') != trial['weight_task']:
             raise ValueError(f'Server task {metadata.get("task")} != {trial["weight_task"]}')
+        expected_stats = trial.get('metadata_source', {}).get('train_stats_sha256')
+        if expected_stats and metadata.get('stats_sha256') != expected_stats:
+            raise ValueError('Model server normalization differs from the frozen manifest')
+        camera = raw.task.layout.cameras['head_stereo_left']
+        result['policy_camera'] = {
+            'name': 'head_stereo_left', 'resolution': list(camera.resolution),
+            'intrinsics': [camera.fx, camera.fy, camera.cx, camera.cy],
+            'position': camera.pose.position, 'quaternion': camera.pose.quaternion,
+        }
+        if raw.isaac is not None:
+            actual = raw.isaac.cameras['head_stereo_left'].get_intrinsics_matrix()
+            expected = np.array([[camera.fx, 0, camera.cx], [0, camera.fy, camera.cy], [0, 0, 1]])
+            if not np.allclose(actual, expected, atol=1e-3):
+                raise ValueError(f'Isaac camera intrinsics differ from task: {actual} != {expected}')
+            result['policy_camera']['isaac_intrinsics'] = actual
         infer = agent.client.infer
 
         def recorded_infer(request):
@@ -191,6 +206,9 @@ def run_trial(trial, output, host, port, sim_mode='mujoco', isaac_session='trial
             state = np.asarray(request['states'])
             if image.dtype != np.uint8 or image.ndim != 3 or image.shape[2] != 3:
                 raise ValueError(f'Invalid policy image: {image.shape} {image.dtype}')
+            width, height = result['policy_camera']['resolution']
+            if image.shape != (height, width, 3):
+                raise ValueError(f'Policy camera resolution mismatch: {image.shape}')
             if state.shape != (28,) or not np.isfinite(state).all():
                 raise ValueError(f'Invalid policy state: {state.shape}')
             Image.fromarray(image).save(output / f'input_{len(requests):03d}.png')
@@ -297,6 +315,12 @@ def run_trial(trial, output, host, port, sim_mode='mujoco', isaac_session='trial
                                                  trailing_steps=50 if decoupled else 0)
         result['success'] = success
         result['outcome'] = 'success' if success else 'failure'
+        if trial['env_id'] == 'simple/G1WholebodyBendPickMP-v0':
+            # Keep the executable upstream 9-cm stopping rule. Score the paper's
+            # 5-cm description separately on the same trajectory, without early stopping.
+            maximum = max(row['reward'] for row in telemetry if row['phase'] == 'scored')
+            result['lift_scores'] = {'code_9cm': success, 'paper_5cm': maximum > 0.5,
+                                     'max_clipped_lift_m': maximum * 0.1}
     except BaseException as error:
         result.update(outcome='error', error=repr(error), traceback=traceback.format_exc())
         raise
