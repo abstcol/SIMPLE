@@ -115,3 +115,35 @@ videos from that fixed set; if a task has no success or no failure, report that.
 For BendPick, `lift_scores.paper_5cm` is a secondary metric; the primary executable
 criterion stays at 9 cm. Normalization equivalence and Isaac 4.5 pixel parity remain
 unresolved, so these runs are not a claim of reproducing the paper's success rate.
+
+## SIMPLE-Phys: target mass switch
+
+Task definitions, scores and budgets stay unchanged. `--mass-scale` enables uniform
+scaling of the target's mass and inertia during scene construction, before the
+first physics step and stand warmup. COM, geometry, friction and other actors stay
+unchanged. Omit it to disable the perturbation; `1` is an enabled baseline check.
+
+```bash
+python scripts/reproduction/prepare_pi05_suite.py \
+  --data-root data/pi05-suite --output experiments/reproduction/phys/mass-2 \
+  --pilot --hand-profile pre_nov9 --mass-scale 2
+```
+
+Launch these manifests normally, selecting `G1WholebodyBendPickMP-v0` and
+`G1WholebodyTabletopGraspMP-v0`. `--hand-profile` applies only to AMO; decoupled
+controllers keep their own settings. Use distinct output directories for disabled,
+1x and 2x runs, with the same scenes/seeds and runtime/physics profile.
+
+Each trial optionally accepts `"physics": {"enabled": true, "mass_scale": 2}`.
+For other callers, pass that dictionary as `gym.make(..., physics=...)`.
+Invalid scales (nonfinite, zero, negative or boolean) are rejected. The initial
+implementation supports rigid `ObjectActor` targets, including convex mesh
+assemblies and primitive boxes. Every reset rebuilds from nominal asset values.
+
+Results record the requested switch/scale, effective scale and compiled target
+mass, local COM, principal inertia and inertial orientation. Existing object-force
+records retain the upstream extra downward force: it is **not** rescaled or disabled.
+For example, the ordinary target remains subject to an extra 0.981 N in upstream
+mode at both 1x and 2x. This experiment varies inertial/gravitational mass under a
+fixed extra load; it is not a pure-gravity mass study. Physics truth is kept in
+trial/results metadata, not sent to the VLA.
