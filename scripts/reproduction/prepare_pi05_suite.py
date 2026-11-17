@@ -6,6 +6,7 @@ condition with both model seeds per task; these trials never count toward the ma
 """
 import argparse
 import json
+import math
 from pathlib import Path
 
 from pi05_common import (
@@ -77,7 +78,13 @@ def main():
     parser.add_argument('--data-root', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--pilot', action='store_true')
+    parser.add_argument('--mass-scale', type=float,
+                        help='Enable target mass/inertia scaling; omitted means disabled')
+    parser.add_argument('--hand-profile', choices=('current', 'pre_nov9'),
+                        help='AMO hand profile; decoupled tasks retain their own controller')
     args = parser.parse_args()
+    if args.mass_scale is not None and (not math.isfinite(args.mass_scale) or args.mass_scale <= 0):
+        parser.error('--mass-scale must be finite and positive')
     catalog_path = Path(__file__).with_name('pi05-tasks.json')
     catalog = json.loads(catalog_path.read_text())
     if len(catalog['contracts']) != 6:
@@ -94,6 +101,11 @@ def main():
                'note': 'Initial conditions vary within one scene UID per task; these are not ten different rooms.',
                'tasks': []}
     for records, task_summary in prepared:
+        for record in records:
+            if args.mass_scale is not None:
+                record['physics'] = dict(enabled=True, mass_scale=args.mass_scale)
+            if args.hand_profile is not None and record['controller'] == 'amo':
+                record['hand_profile'] = args.hand_profile
         filename = task_summary['env_id'].removeprefix('simple/') + '.json'
         path = args.output / filename
         write_json(path, records)

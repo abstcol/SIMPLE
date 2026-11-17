@@ -29,13 +29,16 @@ from PIL import Image
 import os
 import cv2
 import transforms3d as t3d
+from simple.dr.physics import MassPerturbation
 
 xyzw_to_wxyz = lambda q: np.array([q[3], q[0], q[1], q[2]])
 
 class MujocoSimulator(Simulator):
 
-    def __init__(self, task:Task, render_hz:int=30, physics_dt: float = 0.002, headless=True) -> None:
+    def __init__(self, task:Task, render_hz:int=30, physics_dt: float = 0.002, headless=True,
+                 physics: dict | None = None) -> None:
         self.task = task
+        self.mass_perturbation = MassPerturbation(**({} if physics is None else physics))
         self.render_hz = task.metadata["render_hz"] if "render_hz" in self.task.metadata else render_hz
         self.physics_dt = task.metadata["physics_dt"] if "physics_dt" in self.task.metadata else physics_dt
 
@@ -127,6 +130,9 @@ class MujocoSimulator(Simulator):
         from simple.core.actor import RobotActor, ObjectActor, ArticulatedObjectActor, CameraEntity
         from simple.assets.primitive import Primitive
 
+        if self.mass_perturbation.enabled and not isinstance(self.task.layout.actors.get('target'), ObjectActor):
+            raise ValueError('Mass perturbation requires a rigid ObjectActor named target')
+
         # https://mujoco.readthedocs.io/en/stable/computation/index.html
         # https://mujoco.readthedocs.io/en/stable/modeling.html#preventing-slip
         mjSpec = mujoco.MjSpec()
@@ -152,7 +158,8 @@ class MujocoSimulator(Simulator):
                 # This is a string, which means it's a name of an asset
                 # asset = self.task.layout.assets[actor]
                 # actor = Actor.from_asset(asset)
-                self._build_object(mjSpec, mj_worldbody, actor)
+                scale = self.mass_perturbation.effective_scale if objtype == 'target' else 1.0
+                self._build_object(mjSpec, mj_worldbody, actor, mass_scale=scale)
             elif isinstance(actor, RobotActor):
                 self._build_robot(mjSpec, mj_worldbody, actor) # HACK make sure called first
             elif isinstance(actor, Primitive):
@@ -299,14 +306,14 @@ class MujocoSimulator(Simulator):
             # Upstream also adds this force when global gravity is enabled.
             mj_obj.xfrc_applied[2] = -9.81 * (1.0 if is_container else 0.1)
 
-    def _build_object(self, mjSpec, mjWorld, actor: ObjectActor):
+    def _build_object(self, mjSpec, mjWorld, actor: ObjectActor, mass_scale=1.0):
         # asset_id = actor.asset.uid
 
         # Primitive targets (e.g. a cube) have no collision meshes; build a
         # single movable box geom from their extent instead.
         from simple.assets.primitive import Primitive
         if isinstance(actor.asset, Primitive):
-            self._build_primitive_object(mjSpec, mjWorld, actor)
+            self._build_primitive_object(mjSpec, mjWorld, actor, mass_scale=mass_scale)
             return
 
         # TODO primitive types
@@ -341,7 +348,8 @@ class MujocoSimulator(Simulator):
                 # and rotation around the two axes of the tangent plane
                 condim=4,  
                 # total mass 0.1 helps preventing slipping
-                mass=0.1/num_convex, 
+                # Uniform density scaling preserves COM; the compiler scales inertia.
+                mass=(0.1/num_convex) * mass_scale,
                 # rubber on rough ground: large static, sliding and torisonal friction
                 friction=[0.8, 0.05, 0.005],  
                 rgba=[1, 1, 1, 1],
@@ -351,7 +359,7 @@ class MujocoSimulator(Simulator):
         if not getattr(actor.asset, "static", False):  # furniture such as the dog bed stays fixed
             mj_obj.add_freejoint(name=f'{label}_joint')
 
-    def _build_primitive_object(self, mjSpec, mjWorld, actor: ObjectActor):
+    def _build_primitive_object(self, mjSpec, mjWorld, actor: ObjectActor, mass_scale=1.0):
         """Build a movable box geom for a primitive target (e.g. a cube).
 
         Mirrors the mesh-object build (free body + friction/contact tuning) but
@@ -374,7 +382,7 @@ class MujocoSimulator(Simulator):
             # MuJoCo box size is half-extents.
             size=(0.5 * np.array(asset.size)).tolist(),
             condim=4,
-            mass=0.1,
+            mass=0.1 * mass_scale,
             friction=[0.8, 0.05, 0.005],
             # Fixed, neutral cardboard-box color (same every episode).
             rgba=[0.76, 0.6, 0.42, 1],

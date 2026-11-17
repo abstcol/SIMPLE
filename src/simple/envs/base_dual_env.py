@@ -59,6 +59,7 @@ class BaseDualSim(gym.Env):
         headless=True, 
         webrtc=False,
         *args, 
+        physics: dict | None = None,
         **kwargs
     ) -> None:
         self.headless = headless
@@ -82,7 +83,8 @@ class BaseDualSim(gym.Env):
             self.isaac = None
         
         from simple.engines import MujocoSimulator
-        self.mujoco = MujocoSimulator(self.task, headless=("isaac" in self.sim_mode) or headless)
+        self.mujoco = MujocoSimulator(self.task, headless=("isaac" in self.sim_mode) or headless,
+                                      physics=physics)
         self.task = TaskRegistry.make(task, *args, **kwargs) if isinstance(task, str) else task
         
         self.action_space = self.task.action_space

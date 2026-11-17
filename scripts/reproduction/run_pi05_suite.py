@@ -102,7 +102,8 @@ def run_trial(trial, output, host, port, sim_mode='mujoco_isaac', isaac_session=
         random.seed(trial['sim_seed'])
         np.random.seed(trial['sim_seed'])
         torch.manual_seed(trial['sim_seed'])
-        kwargs = dict(sim_mode=sim_mode, headless=True, webrtc=False, render_hz=50)
+        kwargs = dict(sim_mode=sim_mode, headless=True, webrtc=False, render_hz=50,
+                      physics=trial.get('physics'))
         decoupled = trial['controller'] == 'decoupled'
         if decoupled:
             import decoupled_wbc
@@ -163,6 +164,16 @@ def run_trial(trial, output, host, port, sim_mode='mujoco_isaac', isaac_session=
             result['isaac_app_id'] = id(raw.simulation_app)
             result['isaac_stage'] = raw.isaac.world.stage.GetRootLayer().identifier
         sim = raw.mujoco
+        physics = sim.mass_perturbation
+        result['physics'] = dict(enabled=physics.enabled, mass_scale=physics.mass_scale,
+                                 effective_mass_scale=physics.effective_scale)
+        if 'target' in sim.mj_objects:
+            target_id = sim.mj_objects['target'].id
+            result['target_physics'] = dict(
+                mass_kg=float(sim.mjModel.body_mass[target_id]),
+                com_local_m=sim.mjModel.body_ipos[target_id].copy(),
+                inertia_kg_m2=sim.mjModel.body_inertia[target_id].copy(),
+                inertia_quaternion=sim.mjModel.body_iquat[target_id].copy())
         result['object_external_forces'] = {
             name: body.xfrc_applied.copy() for name, body in sim.mj_objects.items()}
         result['reset_state_stage'] = 'before_stabilization' if decoupled else 'after_amo_warmup'
