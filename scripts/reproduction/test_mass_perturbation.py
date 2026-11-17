@@ -66,7 +66,8 @@ def test_build_and_repeated_reset_preserve_everything_except_target_mass_and_ine
     baseline, ids = build(MassPerturbation())
     assert baseline['body_mass'][ids[0]] == pytest.approx(.1)
     for config in (MassPerturbation(False, 2), MassPerturbation(True, 1),
-                   MassPerturbation(True, 2), MassPerturbation(), MassPerturbation(True, 1)):
+                   MassPerturbation(True, 2), MassPerturbation(True, 10), MassPerturbation(True, 20),
+                   MassPerturbation(), MassPerturbation(True, 1)):
         current, current_ids = build(config)
         assert current_ids == ids
         factor = config.effective_scale

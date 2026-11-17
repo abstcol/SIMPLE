@@ -6,6 +6,18 @@ import math
 import re
 
 
+def select_tasks(items, names=None):
+    """Select frozen task contracts in the requested order, or retain all."""
+    available = {item['env_id'].removeprefix('simple/'): item for item in items}
+    if names is None:
+        return list(items)
+    if len(set(names)) != len(names):
+        raise ValueError('Task names must be unique')
+    if set(names) - available.keys():
+        raise ValueError(f'Unknown tasks: {set(names) - available.keys()}')
+    return [available[name] for name in names]
+
+
 def validate_manifest(records):
     if not isinstance(records, list) or not records:
         raise ValueError('Manifest must be a nonempty JSON list of trials')
@@ -33,6 +45,13 @@ def validate_manifest(records):
         if 'hand_profile' in trial and (trial['hand_profile'] not in ('current', 'pre_nov9')
                                         or trial['controller'] != 'amo'):
             raise ValueError(f'{name}: hand_profile requires current/pre_nov9 and AMO')
+        physics = trial.get('physics')
+        if physics is not None:
+            if not isinstance(physics, dict) or set(physics) - {'enabled', 'mass_scale'}:
+                raise ValueError(f'{name}: physics accepts only enabled and mass_scale')
+            enabled, scale = physics.get('enabled', False), physics.get('mass_scale', 1.0)
+            if type(enabled) is not bool or type(scale) not in (int, float) or not math.isfinite(scale) or scale <= 0:
+                raise ValueError(f'{name}: physics requires a boolean enabled and finite positive mass_scale')
         if not isinstance(trial['env_id'], str) or not trial['env_id'].startswith('simple/'):
             raise ValueError(f'{name}: expected a registered simple/ environment')
         threshold = trial['success_criteria']

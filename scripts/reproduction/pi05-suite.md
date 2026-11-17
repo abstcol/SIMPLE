@@ -1,8 +1,10 @@
 # Six-task π0.5 evaluation
 
-The protocol is **10 published Level 0 initial conditions × model seeds 0 and 1**,
+The default protocol is **10 published Level 0 initial conditions × model seeds 0 and 1**,
 with simulation seed 0: 20 trials per task, 120 total. These are ten paired scenes,
 not twenty independent scenes. Each task uses its own released checkpoint.
+`--tasks` selects the same environment names in the preparer and launcher;
+`--model-seeds` selects sampling seeds during preparation. Simulation seed stays 0.
 
 | Environment suffix after `G1Wholebody` | Controller | Scored steps | Executable success rule |
 |---|---|---:|---|
@@ -54,8 +56,9 @@ unzip -n data/downloads/psi-data/simple/G1WholebodyBendPickMP-v0.zip \
   G1WholebodyBendPickMP-v0/meta/stats.json -d data/pi05-suite/train
 ```
 
-Repeat with the other catalog entries; preparation currently expects all six tasks'
-metadata. Verify archives against catalog hashes and weights against the pinned
+Repeat with the other catalog entries. Default preparation expects all six tasks'
+metadata; `--tasks` limits metadata reads and output to the requested tasks.
+Verify archives against catalog hashes and weights against the pinned
 Hugging Face LFS SHA256. The manifest generator independently rejects changed
 metadata hashes, wrong dimensions, duplicate scenes or non-Level-0 inputs.
 Newer training metadata is not interchangeable with this frozen baseline.
@@ -150,9 +153,33 @@ mode at both 1x and 2x. This experiment varies inertial/gravitational mass under
 fixed extra load; it is not a pure-gravity mass study. Physics truth is kept in
 trial/results metadata, not sent to the VLA.
 
-Live perturbation validation currently covers the two AMO tasks above. The
-GR00T-WBC candidate tasks have nominal baselines only; enabled-mass validation is
-still pending. The preparation command defaults to 20 trials per task, whereas
-the recorded 1–100x sweeps used ten conditions with model seed 0. Use each run's
-frozen manifest for exact protocol reproduction; see the overview for evidence
-locations and controller-specific interpretation.
+### Multi-task mass sweep
+
+Use one frozen manifest per task for all requested scales. This prepares the
+three GR00T-WBC tasks at 1/10/20x with model seed 0: 30 trials per task, 90 total.
+Each scale uses the same ten initial conditions. Scale order rotates by condition;
+trial IDs include the scale, and the launcher reuses the model and Isaac per task.
+
+```bash
+python scripts/reproduction/prepare_pi05_suite.py \
+  --data-root data/pi05-suite --output experiments/reproduction/phys-gr00t/manifests \
+  --tasks G1WholebodyXMovePickTeleop-v0 \
+          G1WholebodyLocomotionPickBetweenTablesTeleop-v0 G1WholebodyHandoverTeleop-v0 \
+  --model-seeds 0 --mass-scales 1 10 20
+python scripts/reproduction/launch_pi05_suite.py \
+  --manifests experiments/reproduction/phys-gr00t/manifests \
+  --data-root data/pi05-suite --weights-root data/checkpoints/pi05-suite \
+  --output experiments/reproduction/phys-gr00t/run-01 --isaac-session task --gpu 0
+```
+
+`--mass-scale` retains the legacy single-scale trial IDs. `--mass-scales` is
+mutually exclusive with it and adds `_mass_<scale>` to each trial ID. Both emit
+the same `physics.enabled`/`physics.mass_scale` fields; omission disables physics
+perturbation. Invalid or duplicate scales/seeds and unknown tasks fail before
+creating outputs. The selected rigid object remains the task's `target` role.
+
+Default preparation still creates 20 nominal trials per task. Use
+`--model-seeds 0` for ten per scale, or `--model-seeds 0 1` for twenty. Existing
+run directories are never overwritten. Keep first-step physics verification in
+the recorded run, and preserve each controller's original parameters and task
+score; the overview distinguishes completed validations from queued experiments.
