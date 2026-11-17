@@ -40,6 +40,16 @@ videos. Policy videos use Isaac; the overview video is a MuJoCo diagnostic view.
 See the [evaluation guide](scripts/reproduction/pi05-suite.md) for the six tasks,
 outputs, explicit compatibility options and interpretation of success rates.
 
+## SIMPLE-Phys
+
+The [project overview](docs/projects/simple-phys-project.md) records the research
+scope, verified mass sweeps, nominal task baselines and next steps. Target mass
+scaling is implemented; COM and contact-friction perturbations remain planned.
+The [evaluation guide](scripts/reproduction/pi05-suite.md#simple-phys-target-mass-switch)
+documents the existing switch. Experiments retain task definitions and explicitly
+record controller/hand profiles; current pressure tests are not an expert-screened
+paper benchmark.
+
 ## Repository layout
 
 | Path | Purpose |
@@ -50,7 +60,7 @@ outputs, explicit compatibility options and interpretation of success rates.
 | `data/` | Local assets, weights and task metadata; large files are not committed |
 | `experiments/reproduction/` | Local run outputs; not committed |
 | `docs/source/` | Upstream architecture and API documentation |
-| `docs/projects/simple-phys-project.md` | Proposed physics-robustness research plan; not a completed benchmark |
+| `docs/projects/simple-phys-project.md` | Research scope, verified results, evidence locations and next steps |
 
 Early component probes, arm demos, floor-texture experiments and standalone action
 replay scripts have been retired. Their source remains in Git history. Existing

@@ -38,5 +38,7 @@ compatibility, diagnostics and evaluation accounting. Runtime changes also need
 a small live inference pilot; unit tests do not establish visual or task success.
 Keep pilot outputs separate from formal scores.
 
-The [SIMPLE-Phys plan](../../docs/projects/simple-phys-project.md) describes future
-research scope. It is separate from the current pretrained-policy evaluation.
+The [SIMPLE-Phys overview](../../docs/projects/simple-phys-project.md) is the single
+record of research scope, verified mass sweeps, nominal task results, evidence
+locations and next steps. Keep commands here and in the evaluation guide; do not
+copy experiment tables or machine-specific paths into additional guides.

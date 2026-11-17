@@ -3,6 +3,8 @@
 Comparison base: upstream SIMPLE
 [`2c38755`](https://github.com/physical-superintelligence-lab/SIMPLE/tree/2c38755fe78140d3511a5ca0ebc0b1f20352ddd9).
 This inventory describes the fork; it does not assert equivalence to the paper.
+Verified experiment results and their limits are recorded separately in the
+[SIMPLE-Phys overview](../../docs/projects/simple-phys-project.md).
 
 ## Physics and task behavior
 
@@ -80,6 +82,12 @@ Infrastructure errors stop the batch and leave remaining trials `unrun`.
 The websocket timeout accommodates slow cold inference, without altering action
 budgets. The four `decoupled` tasks use GR00T Balance/Walk, not SONIC token control,
 despite the `g1_sonic` robot class name.
+
+These GR00T-WBC baselines retain upstream hand mapping and gains. The upstream
+pi0.5 adapter constructs 32 state values but sends the first 28; the recorded
+baselines preserve that behavior. The isolated 32-state waist-input probe is not
+merged and is excluded from the reported baseline scores. Neither that probe nor
+AMO's `pre_nov9` hand profile should be assumed active in a GR00T-WBC run.
 
 ## Cleanup migration
 
