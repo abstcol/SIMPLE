@@ -16,6 +16,8 @@ not twenty independent scenes. Each task uses its own released checkpoint.
 The lift criteria do not require sustained holding. XMovePick's weight name omits
 `Teleop`; the catalog handles this mapping. GR00T Balance/Walk is not SONIC token
 control. Read [compatibility](compatibility.md) before comparing to paper results.
+Verified results, experiment-specific sample counts and task-selection decisions
+are maintained in the [SIMPLE-Phys overview](../../docs/projects/simple-phys-project.md).
 
 ## Prepare inputs
 
@@ -86,7 +88,7 @@ and sampling seed for every trial and stops only its own processes.
 
 | Option | Behavior |
 |---|---|
-| `--tasks G1WholebodyBendPickMP-v0` | Run only selected environment names; omit for all six |
+| `--tasks G1WholebodyBendPickMP-v0` | Run one or more selected environment names; omit for all six |
 | `--isaac-session task` | Reuse Isaac within a task; rebuild each scene/controller |
 | `--isaac-session trial` | Default: fresh Isaac process for each trial; slower diagnostic fallback |
 | `--gpu N` | Bind one physical GPU and default service port to `8015 + N` |
@@ -147,3 +149,10 @@ For example, the ordinary target remains subject to an extra 0.981 N in upstream
 mode at both 1x and 2x. This experiment varies inertial/gravitational mass under a
 fixed extra load; it is not a pure-gravity mass study. Physics truth is kept in
 trial/results metadata, not sent to the VLA.
+
+Live perturbation validation currently covers the two AMO tasks above. The
+GR00T-WBC candidate tasks have nominal baselines only; enabled-mass validation is
+still pending. The preparation command defaults to 20 trials per task, whereas
+the recorded 1–100x sweeps used ten conditions with model seed 0. Use each run's
+frozen manifest for exact protocol reproduction; see the overview for evidence
+locations and controller-specific interpretation.
