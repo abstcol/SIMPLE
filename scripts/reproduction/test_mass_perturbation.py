@@ -76,6 +76,10 @@ def test_build_and_repeated_reset_preserve_everything_except_target_mass_and_ine
             if field in ('body_mass', 'body_inertia'):
                 expected[ids[0]] *= factor
                 np.testing.assert_allclose(current[field], expected, rtol=1e-12, atol=1e-15)
+            elif mesh and field in ('body_ipos', 'body_iquat'):
+                # Recompiling scaled mesh densities introduces floating-point
+                # roundoff in derived COM/principal axes, not a geometry change.
+                np.testing.assert_allclose(current[field], expected, rtol=1e-12, atol=1e-15)
             else:
                 np.testing.assert_array_equal(current[field], expected)
 
