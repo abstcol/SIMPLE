@@ -8,7 +8,7 @@ import socket
 import subprocess
 import time
 
-from pi05_common import checked_read, validate_manifest, write_json
+from pi05_common import checked_read, select_tasks, validate_manifest, write_json
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / 'scripts/reproduction'
@@ -49,16 +49,15 @@ def main():
         args.port = 8015 + (args.gpu or 0)
     args.output = args.output.resolve()
     summary = json.loads((args.manifests / 'summary.json').read_text())
-    available = {item['env_id'].removeprefix('simple/') for item in summary['tasks']}
-    if args.tasks and set(args.tasks) - available:
-        parser.error(f'Unknown tasks: {set(args.tasks) - available}')
+    try:
+        selected = select_tasks(summary['tasks'], args.tasks)
+    except ValueError as error:
+        parser.error(str(error))
     tasks = []
     # Both image modes use one simulator environment; never mix old site-packages.
     sim_python = ROOT / '.venv-isaac/bin/python'
-    for item in summary['tasks']:
+    for item in selected:
         name = item['env_id'].removeprefix('simple/')
-        if args.tasks and name not in args.tasks:
-            continue
         manifest = (args.manifests / item['manifest']).resolve()
         records = validate_manifest(json.loads(checked_read(manifest, item['manifest_sha256'])))
         checkpoint = (args.weights_root / records[0]['weight_task'] / 'model.safetensors').resolve()

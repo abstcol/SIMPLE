@@ -21,6 +21,18 @@ def trial(index=0):
 
 
 class SuiteTest(unittest.TestCase):
+    def test_invalid_physics_is_rejected_before_launch(self):
+        for physics in (False, {'enabled': 1}, {'mass_scale': True}, {'mass_scale': 0},
+                        {'mass_scale': float('nan')}, {'mass_scale': float('inf')}, {'role': 'target'}):
+            record = trial()
+            record['physics'] = physics
+            with self.subTest(physics=physics), self.assertRaisesRegex(ValueError, 'physics'):
+                suite.validate_manifest([record])
+        for physics in (None, {}, {'enabled': True, 'mass_scale': 20}):
+            record = trial()
+            record['physics'] = physics
+            suite.validate_manifest([record])
+
     def test_task_session_persists_error_accounting_before_kit_shutdown(self):
         with TemporaryDirectory() as temp:
             root = Path(temp)

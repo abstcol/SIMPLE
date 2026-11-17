@@ -1,8 +1,8 @@
-"""Freeze six pi0.5 manifests: 10 official Level-0 initial conditions x 2 seeds.
+"""Freeze selected pi0.5 tasks, model seeds and optional target-mass sweeps.
 
 Input layout: DATA_ROOT/{eval,train}/ENV_NAME/.../meta. Metadata must match
 the frozen official release in pi05-tasks.json. --pilot emits the first initial
-condition with both model seeds per task; these trials never count toward the main set.
+condition with the selected model seeds; these trials never count toward the main set.
 """
 import argparse
 import json
@@ -10,11 +10,13 @@ import math
 from pathlib import Path
 
 from pi05_common import (
-    checked_read, config_hash, decode_environment_config, sha256, validate_manifest, write_json,
+    checked_read, config_hash, decode_environment_config, select_tasks, sha256, validate_manifest, write_json,
 )
 
+CATALOG_PATH = Path(__file__).with_name('pi05-tasks.json')
 
-def prepare_task(contract, catalog, data_root, pilot):
+
+def prepare_task(contract, catalog, data_root, pilot, model_seeds=(0, 1)):
     task_name = contract['env_id'].removeprefix('simple/')
     source = contract['metadata_source']
     eval_path = Path('eval') / task_name / 'dr-level-0/meta/episodes.jsonl'
@@ -47,7 +49,7 @@ def prepare_task(contract, catalog, data_root, pilot):
         if isinstance(original, str):
             original = json.loads(original.replace('\\"', '"'))
         scene = config['dr_state_dict']['scene']
-        for seed in [0, 1]:
+        for seed in model_seeds:
             records.append({
                 'trial_id': f'{"pilot_" if pilot else ""}episode_{row["episode_index"]:03d}_seed_{seed}',
                 'env_id': contract['env_id'], 'controller': contract['controller'],
@@ -78,34 +80,64 @@ def main():
     parser.add_argument('--data-root', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--pilot', action='store_true')
-    parser.add_argument('--mass-scale', type=float,
-                        help='Enable target mass/inertia scaling; omitted means disabled')
+    parser.add_argument('--tasks', nargs='+', help='Environment names in execution order; omitted means all six')
+    parser.add_argument('--model-seeds', nargs='+', type=int, default=[0, 1],
+                        help='Sampling seeds; default 0 1. Simulation seed stays 0')
+    mass = parser.add_mutually_exclusive_group()
+    mass.add_argument('--mass-scale', type=float,
+                      help='Single target mass/inertia scale; retain legacy trial IDs')
+    mass.add_argument('--mass-scales', nargs='+', type=float,
+                      help='Target mass sweep; append each scale to trial IDs')
     parser.add_argument('--hand-profile', choices=('current', 'pre_nov9'),
                         help='AMO hand profile; decoupled tasks retain their own controller')
     args = parser.parse_args()
-    if args.mass_scale is not None and (not math.isfinite(args.mass_scale) or args.mass_scale <= 0):
-        parser.error('--mass-scale must be finite and positive')
-    catalog_path = Path(__file__).with_name('pi05-tasks.json')
+    if (len(set(args.model_seeds)) != len(args.model_seeds)
+            or any(seed < 0 or seed >= 2**63 for seed in args.model_seeds)):
+        parser.error('--model-seeds must be unique integers in [0, 2**63)')
+    scales = args.mass_scales if args.mass_scales is not None else (
+        [args.mass_scale] if args.mass_scale is not None else None)
+    if scales is not None and (len(set(scales)) != len(scales)
+            or any(not math.isfinite(scale) or scale <= 0 for scale in scales)):
+        parser.error('Mass scales must be unique finite positive values')
+    catalog_path = CATALOG_PATH
     catalog = json.loads(catalog_path.read_text())
     if len(catalog['contracts']) != 6:
         raise ValueError('Expected the six audited pi0.5 task contracts')
-    prepared = [prepare_task(contract, catalog, args.data_root, args.pilot)
-                for contract in catalog['contracts']]
+    try:
+        selected = select_tasks(catalog['contracts'], args.tasks)
+    except ValueError as error:
+        parser.error(str(error))
+    prepared = []
+    for contract in selected:
+        source, task_summary = prepare_task(contract, catalog, args.data_root, args.pilot, args.model_seeds)
+        records = []
+        for base in source:
+            # Rotate scale order by condition; model history/seed reset per trial.
+            offset = base['episode_index'] % len(scales) if scales else 0
+            order = scales[offset:] + scales[:offset] if scales else [None]
+            for scale in order:
+                record = {**base}
+                if scale is not None:
+                    record['physics'] = dict(enabled=True, mass_scale=scale)
+                if args.mass_scales is not None:
+                    label = repr(scale).removesuffix('.0').replace('+', '')
+                    record['trial_id'] += f'_mass_{label}'
+                if args.hand_profile is not None and record['controller'] == 'amo':
+                    record['hand_profile'] = args.hand_profile
+                records.append(record)
+        validate_manifest(records)
+        prepared.append((records, {**task_summary, 'trials': len(records)}))
     # Validate every input before creating any output. Never overwrite a run.
     args.output.mkdir(parents=True, exist_ok=False)
     write_json(args.output / 'tasks.json', catalog)
     summary = {'protocol': 'pilot' if args.pilot else 'main', 'counts_toward_main': not args.pilot,
                'total_trials': sum(len(records) for records, _ in prepared),
-               'model_seeds': [0, 1], 'sim_seed': 0, 'dr_level': 0,
+               'model_seeds': args.model_seeds, 'mass_scales': scales, 'sim_seed': 0, 'dr_level': 0,
+               'mass_order': 'rotate requested scales by episode_index' if scales else None,
                'catalog_sha256': sha256(catalog_path.read_bytes()),
                'note': 'Initial conditions vary within one scene UID per task; these are not ten different rooms.',
                'tasks': []}
     for records, task_summary in prepared:
-        for record in records:
-            if args.mass_scale is not None:
-                record['physics'] = dict(enabled=True, mass_scale=args.mass_scale)
-            if args.hand_profile is not None and record['controller'] == 'amo':
-                record['hand_profile'] = args.hand_profile
         filename = task_summary['env_id'].removeprefix('simple/') + '.json'
         path = args.output / filename
         write_json(path, records)

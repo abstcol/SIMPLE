@@ -27,12 +27,13 @@ From the repository root:
 
 ```bash
 python scripts/reproduction/test_pi05_suite.py
+python scripts/reproduction/test_pi05_prepare.py
 source .env.isaac
 PYTHONPATH="$PWD/src:$PYTHONPATH" PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
   .venv-isaac/bin/python -m pytest -q scripts/reproduction/test_*.py
 ```
 
-The first command uses only the standard library. The second requires pytest in
+The first two commands use only the standard library. The pytest command requires pytest in
 the simulator environment and checks real MuJoCo force/hand behavior, Franka
 compatibility, diagnostics and evaluation accounting. Runtime changes also need
 a small live inference pilot; unit tests do not establish visual or task success.
