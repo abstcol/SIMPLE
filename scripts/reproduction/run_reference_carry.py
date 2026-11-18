@@ -163,11 +163,14 @@ def main():
                          for sign in (1, -1))
 
         stages = [('approach', 100, cradle(.155, .07)),
-                  ('cup_lower_corners', 105, cradle(.058, .05)),
-                  ('lift', 100, cradle(.051, .18, -.01)),
-                  ('hold', 60, cradle(.051, .18, -.01))]
+                  ('cup_lower_corners', 105, cradle(.044 if deep else .058, .05)),
+                  ('lift', 100, cradle(.038 if deep else .051, .18, -.01)),
+                  ('hold', 60, cradle(.038 if deep else .051, .18, -.01))]
         if deep:
-            stages.insert(0, ('step_closer', 125, None))
+            # Keep the palms high and outside the box during the base approach.
+            clear = tuple(wrist_goal([edge - .035, y + sign * .24, top + .28], reach=.10)
+                          for sign in (1, -1))
+            stages[:0] = [('clear_box', 80, clear), ('step_closer', 125, clear)]
     model.vis.global_.offwidth = max(640, model.vis.global_.offwidth)
     model.vis.global_.offheight = max(480, model.vis.global_.offheight)
     renderer = mujoco.Renderer(model, height=480, width=640)
@@ -186,13 +189,12 @@ def main():
                 for step in range(steps):
                     fraction = min(1., (step + 1) / (steps * .80))
                     fraction = fraction**2 * (3 - 2 * fraction)
-                    if goals is not None:
-                        for side, (p0, r0), (p1, r1) in zip(SIDES, origins, goals):
-                            axis = Rotation.from_matrix(r1 @ r0.T).as_rotvec()
-                            ids, values = ik.solve(side, data, p0 + fraction * (p1 - p0),
-                                                   Rotation.from_rotvec(fraction * axis).as_matrix() @ r0,
-                                                   full_goal)
-                            full_goal[ids] += np.clip(values - full_goal[ids], -.055, .055)
+                    for side, (p0, r0), (p1, r1) in zip(SIDES, origins, goals):
+                        axis = Rotation.from_matrix(r1 @ r0.T).as_rotvec()
+                        ids, values = ik.solve(side, data, p0 + fraction * (p1 - p0),
+                                               Rotation.from_rotvec(fraction * axis).as_matrix() @ r0,
+                                               full_goal)
+                        full_goal[ids] += np.clip(values - full_goal[ids], -.055, .055)
                     vx = .15 if name == 'step_closer' and data.qpos[0] < edge - .22 else 0.
                     now = time.monotonic()
                     policy.set_observation(agent._build_wbc_observation(raw.task.robot.prepare_obs()))
@@ -215,7 +217,7 @@ def main():
                     state = {'stage': name, 'step': len(rows) + 1, 'target': info['target'].tolist(),
                              'pelvis': data.qpos[:7].tolist(), 'reward':float(reward),
                              'wrists': [data.body(ik.arms[s][0]).xpos.tolist() for s in SIDES],
-                             'wrist_targets': [p.tolist() for p, _ in goals] if goals is not None else None,
+                             'wrist_targets': [p.tolist() for p, _ in goals],
                              'target_contact_bodies': sorted(touch_bodies), 'commands': action.parameters}
                     rows.append(state)
                     stage_rows.append(state)
