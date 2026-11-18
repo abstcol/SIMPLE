@@ -48,5 +48,7 @@ For a feasibility check using simulator state, run
 `python scripts/reproduction/run_reference_carry.py --manifest PATH --trial ID --output NEW_DIR`
 in the simulator environment. Use a two-table carry manifest produced by the
 mass sweep preparer. The reference uses wrist IK and the existing GR00T policy
-to try supporting and lifting the box. The output records the lift-and-hold
-check separately from the original full-task success flag.
+to support and lift the box. Use `--carry` to continue to the second table
+after the lift-and-hold check passes. Results report the first official
+success step and hands-free placement separately. The demonstrated route was
+validated on Level-0 scene 0 at 10× mass and uses simulator object poses.
