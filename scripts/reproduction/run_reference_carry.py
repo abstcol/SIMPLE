@@ -115,8 +115,8 @@ def main():
     parser.add_argument('--trial', required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--approach', choices=('table-edge', 'bimanual-cradle', 'deep-cradle',
-                                               'loaded-cradle', 'force-cradle', 'side-cradle', 'tip-and-scoop'),
-                        default='tip-and-scoop')
+                                               'loaded-cradle', 'force-cradle', 'side-cradle',
+                                               'tip-and-scoop', 'tracking-cradle'), default='tracking-cradle')
     args = parser.parse_args()
     records = validate_manifest(json.loads(args.manifest.read_text()))
     trial = next((row for row in records if row['trial_id'] == args.trial), None)
@@ -185,7 +185,8 @@ def main():
     ]
     side_entry = args.approach == 'side-cradle'
     scoop = args.approach == 'tip-and-scoop'
-    force_guided = args.approach in ('force-cradle', 'side-cradle')
+    track_box = args.approach == 'tracking-cradle'
+    force_guided = args.approach in ('force-cradle', 'side-cradle', 'tracking-cradle')
     loaded = args.approach == 'loaded-cradle' or force_guided
     if args.approach != 'table-edge':
         # Angle both palms upward and approach the lower corners from the sides.
@@ -217,9 +218,9 @@ def main():
                            ('lift', 200, tuple((p + [0, 0, .13], r) for p, r in cup)),
                            ('hold', 60, tuple((p + [0, 0, .13], r) for p, r in cup))]
     if scoop:
-        left_clear = wrist_goal([edge - .018, y + .055, top + .038], roll=-66, pitch=18, reach=.15)
-        right_near = wrist_goal([x - .092, y - .042, z + .069], roll=-10, pitch=8, reach=.157)
-        right_tip = wrist_goal([x + .008, y - .042, z + .069], roll=-10, pitch=8, reach=.157)
+        left_clear = wrist_goal([edge - .018, y + .013, top + .038], roll=-66, pitch=18, reach=.15)
+        right_near = wrist_goal([x - .092, y + .008, z + .088], roll=-10, pitch=5, yaw=12, reach=.157)
+        right_tip = wrist_goal([x + .043, y + .008, z + .088], roll=-10, pitch=5, yaw=12, reach=.157)
         stages[2:] = [('get_into_position', 115, (left_clear, right_near)),
                       ('tip_box', 145, (left_clear, right_tip)),
                       ('slide_under', 120, (left_clear, right_tip)),
@@ -239,6 +240,7 @@ def main():
     loads = {}
     tip_goal = None
     scoop_goal = None
+    box_velocity = np.zeros(6)
     hand_limits = raw.task.robot.torque_limit
     for joints in (raw.task.robot.left_hand_index, raw.task.robot.right_hand_index):
         np.testing.assert_allclose(hand_limits[joints - 1], [2.45, .7, .7, .7, .7, .7, .7])
@@ -273,6 +275,16 @@ def main():
                     fraction = fraction**2 * (3 - 2 * fraction)
                     commanded_wrists = []
                     step_goals = goals
+                    tracking = track_box and name in ('lift', 'hold')
+                    forward_bias = 0.
+                    shift = np.zeros(3)
+                    if tracking:
+                        # Keep the wrists beside the actual box while damping
+                        # its tendency to move away along the table.
+                        displacement = data.body(target).xpos - initial
+                        shift[:2] = np.clip(displacement[:2], [-.035, -.035], [.09, .035])
+                        mujoco.mj_objectVelocity(model, data, mujoco.mjtObj.mjOBJ_BODY, target, box_velocity, 0)
+                        forward_bias = float(np.clip(-80. * displacement[0] - 12. * box_velocity[3], -8., 8.))
                     if scoop and name in ('tip_box', 'slide_under'):
                         box = data.body(target)
                         box_rotation = box.xmat.reshape(3, 3)
@@ -291,7 +303,7 @@ def main():
                                 step_goals = (wrist_goal(point, roll=-66, pitch=18, reach=.15), tip_goal[1])
                     for i, (side, (p0, r0), (p1, r1)) in enumerate(zip(SIDES, origins, step_goals)):
                         axis = Rotation.from_matrix(r1 @ r0.T).as_rotvec()
-                        position = p0 + fraction * (p1 - p0)
+                        position = p0 + fraction * (p1 - p0) + shift
                         if pressing:
                             position[1] += (-1 if side == 'left' else 1) * squeeze[i]
                         commanded_wrists.append(position.tolist())
@@ -305,7 +317,7 @@ def main():
                         ramp = min(1., (step + 1) / 50.) if name == 'preload' else 1.
                         lift = 4. if name in ('lift', 'hold') and lift_progress else 0.
                         for side, sign in zip(SIDES, (1, -1)):
-                            ik.press(side, data, joint_goal, np.array([0., -sign * 16. * ramp, lift]),
+                            ik.press(side, data, joint_goal, np.array([forward_bias, -sign * 16. * ramp, lift]),
                                      position_gains[side])
                     if scoop and name in ('lift', 'hold'):
                         ik.press('left', data, joint_goal, np.array([1., 0., 9.]), position_gains['left'])
