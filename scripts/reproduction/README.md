@@ -43,3 +43,10 @@ The [SIMPLE-Phys overview](../../docs/projects/simple-phys-project.md) is the si
 record of research scope, verified mass sweeps, nominal task results, evidence
 locations and next steps. Keep commands here and in the evaluation guide; do not
 copy experiment tables or machine-specific paths into additional guides.
+
+For a feasibility check using simulator state, run
+`python scripts/reproduction/run_reference_carry.py --manifest PATH --trial ID --output NEW_DIR`
+in the simulator environment. Use a two-table carry manifest produced by the
+mass sweep preparer. The reference uses wrist IK and the existing GR00T policy
+to try supporting and lifting the box. The output records the lift-and-hold
+check separately from the original full-task success flag.
