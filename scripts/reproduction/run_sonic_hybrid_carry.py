@@ -184,9 +184,20 @@ def run(args, trial):
             while max(bridge.low_cmd.motor_cmd[i].kp for i in range(29)) <= 5:
                 if controller.poll() is not None or time.monotonic() >= deadline:
                     raise RuntimeError('SONIC did not engage. See controller.log.')
+                pub.send(build_command_message(start=False, stop=False, planner=True))
+                time.sleep(.04)
+
+            # Finish the stock motor ramp before running physics near the box.
+            time.sleep(3.1)
+            data.qpos[robot.body_joint_index + robot.qpos_offset - 1] = [
+                bridge.low_cmd.motor_cmd[i].q for i in range(29)
+            ]
+            mujoco.mj_forward(model, data)
+            proprio = robot_state()
+            for _ in range(5):
                 pub.send(build_command_message(start=True, stop=False, planner=True))
                 pub.send(planner_packet(data.qpos[:7], None, (0., 0., 0.), 0., facing))
-                time.sleep(.04)
+                time.sleep(.02)
             heartbeat_stop.set()
             heartbeat.join()
             last_goals = current_wrists()
@@ -268,7 +279,7 @@ def run(args, trial):
                 if not move(phase, count, goals, follow_box=phase in ('cup', 'preload'), stage_base=base_goal):
                     break
             if rows[-1]['standing'] and rows[-1]['phase'] == 'preload':
-                lifted = cradle(.033, .175)
+                lifted = cradle(.023, .175)
                 if move('lift', 145, lifted, follow_box=True):
                     move('hold', 70, lifted, follow_box=True)
         finally:
