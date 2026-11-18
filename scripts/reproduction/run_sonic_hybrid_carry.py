@@ -136,7 +136,6 @@ def run(args, trial):
     heartbeat = threading.Thread(target=publish_state, daemon=True)
     startup_support = 1.
     band_action = ActionCmd('elastic_band')
-    robot.elastic_band.length = float(data.xpos[robot.band_attached_link, 2] - robot.elastic_band.point[2])
 
     def warmup_crane():
         robot.apply_action(band_action)
@@ -158,14 +157,29 @@ def run(args, trial):
                                       env={**os.environ, 'SONIC_FORCE_UNITREE_DDS': '1'})
         heartbeat.start()
         try:
-            nominal_wrists = last_goals = current_wrists()
             deadline = time.monotonic() + args.startup_timeout
             while max(bridge.low_cmd.motor_cmd[i].kp for i in range(29)) <= 5:
                 if controller.poll() is not None or time.monotonic() >= deadline:
                     raise RuntimeError('SONIC did not engage. See controller.log.')
-                pub.send(build_command_message(start=True, stop=False, planner=True))
+                pub.send(build_command_message(start=False, stop=False, planner=True))
                 pub.send(planner_packet(data.qpos[:7], None, 0., facing))
                 time.sleep(.04)
+            # SONIC ramps to its standing motor targets for 3 s. Prepare that
+            # stance before stepping so initialization cannot bump the box.
+            time.sleep(3.1)
+            data.qpos[robot.body_joint_index + robot.qpos_offset - 1] = [
+                bridge.low_cmd.motor_cmd[i].q for i in range(29)
+            ]
+            data.qvel[:] = 0.
+            mujoco.mj_forward(model, data)
+            robot._place_feet_on_ground()
+            proprio = robot_state()
+            band = robot.elastic_band
+            band.length = float(data.xpos[robot.band_attached_link, 2] - band.point[2])
+            last_goals = current_wrists()
+            for _ in range(5):
+                pub.send(build_command_message(start=True, stop=False, planner=True))
+                time.sleep(.02)
 
             def tick(phase, goals, forward=0.):
                 nonlocal proprio, last_goals
@@ -212,19 +226,22 @@ def run(args, trial):
                 print(phase, rows[-1]['displacement_m'], list(rows[-1]['contacts_n']), flush=True)
                 return rows[-1]['standing']
 
-            # Use the existing sim crane during SONIC's three-second motor ramp.
+            # Use the existing sim crane during SONIC's first control steps.
             # Remove its wrench before standing manipulation.
             raw.substep_callback = warmup_crane
             warmup_crane()
-            for _ in range(185):
+            for _ in range(45):
                 tick('startup', None)
-            last_goals = current_wrists()
-            for step in range(60):
-                startup_support = 1. - (step + 1) / 60
-                tick('release_crane', last_goals)
+            for step in range(75):
+                startup_support = 1. - (step + 1) / 75
+                tick('release_crane', None)
             raw.substep_callback = None
             data.xfrc_applied[robot.band_attached_link] = 0.
-            move('settle', 50, last_goals)
+            for _ in range(50):
+                tick('settle', None)
+                if not rows[-1]['standing']:
+                    break
+            last_goals = current_wrists()
             if rows[-1]['standing'] and move('approach', 105, cradle(.145, .076)):
                 if move('cup', 105, cradle(.045, .046)):
                     move('preload', 65, cradle(.033, .046), follow_box=True)
