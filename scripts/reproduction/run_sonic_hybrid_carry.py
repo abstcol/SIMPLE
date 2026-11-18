@@ -171,8 +171,10 @@ def run(args, trial):
                 bridge.low_cmd.motor_cmd[i].q for i in range(29)
             ]
             data.qvel[:] = 0.
-            mujoco.mj_forward(model, data)
+            # Start the ground ray above the floor after changing the leg angles.
+            data.qpos[2] += .15
             robot._place_feet_on_ground()
+            mujoco.mj_forward(model, data)
             proprio = robot_state()
             band = robot.elastic_band
             band.length = float(data.xpos[robot.band_attached_link, 2] - band.point[2])
