@@ -321,7 +321,7 @@ def main():
         print('initial', initial.tolist(), 'table edge/top', [edge, top], flush=True)
         result = {'trial_id':trial['trial_id'], 'approach':args.approach,
                   'target_mass_kg':float(model.body_mass[target]),
-                  'hand_torque_limits_nm':hand_limits[raw.task.robot.right_hand_index - 1],
+                  'hand_torque_limits_nm':hand_limits[raw.task.robot.right_hand_index - 1].tolist(),
                   'target_initial_height_m':float(z), 'max_lift_m':max(z_values, default=z)-z,
                   'lift_and_hold_pass':len(hold) == 60 and clear_of_table
                   and min(row['target'][2] for row in hold[-25:]) - z >= .05,
