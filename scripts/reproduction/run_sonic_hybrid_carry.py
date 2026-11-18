@@ -77,8 +77,7 @@ def run(args, trial):
     np.random.seed(trial['sim_seed'])
     config = SimLoopConfig().load_wbc_yaml()
     config.update(ENV_NAME='simple', USE_JOYSTICK=False)
-    physics = dict(trial.get('physics') or {})
-    physics['mass'] = {'scale': args.mass, 'actor': 'target'}
+    physics = {'mass': {'scale': args.mass, 'actor': 'target'}}
     env = gym.make(TASK, sim_mode='mujoco', headless=True, webrtc=False,
                    render_hz=FPS, physics_dt=config['SIMULATE_DT'],
                    sonic_config=config, physics=physics)
