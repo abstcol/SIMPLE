@@ -115,7 +115,7 @@ def main():
     parser.add_argument('--trial', required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--approach', choices=('table-edge', 'bimanual-cradle', 'deep-cradle',
-                                               'loaded-cradle', 'force-cradle'), default='force-cradle')
+                                               'loaded-cradle', 'force-cradle', 'side-cradle'), default='side-cradle')
     args = parser.parse_args()
     records = validate_manifest(json.loads(args.manifest.read_text()))
     trial = next((row for row in records if row['trial_id'] == args.trial), None)
@@ -182,20 +182,22 @@ def main():
         ('lift', 100, (left_lift, right_support)),
         ('hold', 60, (left_lift, right_support)),
     ]
-    force_guided = args.approach == 'force-cradle'
-    loaded = args.approach in ('loaded-cradle', 'force-cradle')
+    side_entry = args.approach == 'side-cradle'
+    force_guided = args.approach in ('force-cradle', 'side-cradle')
+    loaded = args.approach == 'loaded-cradle' or force_guided
     if args.approach != 'table-edge':
         # Angle both palms upward and approach the lower corners from the sides.
         # The fingers are open. The arms move the palms inward and then upward.
         deep = args.approach != 'bimanual-cradle'
 
         def cradle(clearance, height, forward=0.):
-            return tuple(wrist_goal([x + forward, y + sign * clearance, top + height],
-                                    roll=-sign * 45, yaw=-sign * (12 if deep else 22),
+            return tuple(wrist_goal([x + forward + (.055 if side_entry else 0.),
+                                     y + sign * clearance, top + height],
+                                    roll=-sign * 45, yaw=-sign * (5 if side_entry else 12 if deep else 22),
                                     reach=.075 if deep else .13)
                          for sign in (1, -1))
 
-        stages = [('approach', 100, cradle(.155, .07)),
+        stages = [('approach', 100, cradle(.175 if side_entry else .155, .07)),
                   ('cup_lower_corners', 105, cradle(.044 if deep else .058, .05)),
                   ('lift', 100, cradle(.038 if deep else .051, .18, -.01)),
                   ('hold', 60, cradle(.038 if deep else .051, .18, -.01))]
