@@ -72,6 +72,16 @@ class WristIK:
                                             limits[:, 0] + .005, limits[:, 1] - .005)
         return policy_ids, scratch.qpos[qpos_ids].copy()
 
+    def press(self, side, state, goal, force, position_gains):
+        """Translate a palm force into a bounded position-reference offset."""
+        body, _, velocity_ids, limits, policy_ids = self.arms[side]
+        wrist = state.body(body)
+        palm = wrist.xpos + .085 * wrist.xmat.reshape(3, 3)[:, 0]
+        mujoco.mj_jac(self.model, state, self.jac_position, None, palm, body)
+        offset = (self.jac_position[:, velocity_ids].T @ force) / position_gains
+        goal[policy_ids] = np.clip(goal[policy_ids] + np.clip(offset, -.17, .17),
+                                   limits[:, 0] + .005, limits[:, 1] - .005)
+
 
 def wrist_goal(point, roll=0., pitch=0., yaw=0., reach=.14):
     """Position a point on the open hand along the wrist's local x-axis."""
@@ -104,8 +114,8 @@ def main():
     parser.add_argument('--manifest', type=Path, required=True)
     parser.add_argument('--trial', required=True)
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--approach', choices=('table-edge', 'bimanual-cradle', 'deep-cradle', 'loaded-cradle'),
-                        default='loaded-cradle')
+    parser.add_argument('--approach', choices=('table-edge', 'bimanual-cradle', 'deep-cradle',
+                                               'loaded-cradle', 'force-cradle'), default='force-cradle')
     args = parser.parse_args()
     records = validate_manifest(json.loads(args.manifest.read_text()))
     trial = next((row for row in records if row['trial_id'] == args.trial), None)
@@ -172,8 +182,9 @@ def main():
         ('lift', 100, (left_lift, right_support)),
         ('hold', 60, (left_lift, right_support)),
     ]
-    loaded = args.approach == 'loaded-cradle'
-    if args.approach in ('bimanual-cradle', 'deep-cradle', 'loaded-cradle'):
+    force_guided = args.approach == 'force-cradle'
+    loaded = args.approach in ('loaded-cradle', 'force-cradle')
+    if args.approach != 'table-edge':
         # Angle both palms upward and approach the lower corners from the sides.
         # The fingers are open. The arms move the palms inward and then upward.
         deep = args.approach != 'bimanual-cradle'
@@ -213,6 +224,12 @@ def main():
     squeeze = np.zeros(2)
     lift_progress = 0
     loads = {}
+    hand_limits = raw.task.robot.torque_limit
+    for joints in (raw.task.robot.left_hand_index, raw.task.robot.right_hand_index):
+        np.testing.assert_allclose(hand_limits[joints - 1], [2.45, .7, .7, .7, .7, .7, .7])
+    arm_kp = dict(zip(raw.task.robot.joint_names[:29], config['MOTOR_KP']))
+    position_gains = {side: np.array([arm_kp[model.joint(i).name] for i in range(model.njnt)
+                                     if model.jnt_qposadr[i] in ik.arms[side][1]]) for side in SIDES}
     try:
         with imageio.get_writer(args.output / 'overview.mp4', fps=25, codec='libx264') as video:
             for name, steps, goals in stages:
@@ -227,7 +244,7 @@ def main():
                     fraction = min(1., (step + 1) / (steps * .80))
                     pressure = np.array([lateral_pressure(loads, side, sign)
                                          for side, sign in zip(SIDES, (1, -1))])
-                    if pressing:
+                    if pressing and not force_guided:
                         squeeze = np.clip(squeeze + .00018 * np.clip(7. - pressure, -4., 7.), 0., .037)
                     if loaded and name == 'lift':
                         if pressure.min() >= 3. or loads.get('table', np.zeros(3))[2] < 2.:
@@ -246,9 +263,16 @@ def main():
                                                full_goal)
                         full_goal[ids] += np.clip(values - full_goal[ids], -.055, .055)
                     vx = .15 if name == 'step_closer' and data.qpos[0] < edge - .22 else 0.
+                    joint_goal = full_goal.copy()
+                    if force_guided and pressing:
+                        ramp = min(1., (step + 1) / 50.) if name == 'preload' else 1.
+                        lift = 4. if name in ('lift', 'hold') and lift_progress else 0.
+                        for side, sign in zip(SIDES, (1, -1)):
+                            ik.press(side, data, joint_goal, np.array([0., -sign * 16. * ramp, lift]),
+                                     position_gains[side])
                     now = time.monotonic()
                     policy.set_observation(agent._build_wbc_observation(raw.task.robot.prepare_obs()))
-                    policy.set_goal({'target_upper_body_pose': full_goal[upper].copy(),
+                    policy.set_goal({'target_upper_body_pose': joint_goal[upper],
                                      'navigate_cmd': np.array([vx, 0., 0., 0.]),
                                      'base_height_command': np.array([.74]),
                                      'target_time': now + 1 / agent._control_frequency,
@@ -265,7 +289,7 @@ def main():
                              'wrists': [data.body(ik.arms[s][0]).xpos.tolist() for s in SIDES],
                              'wrist_targets': commanded_wrists,
                              'target_contact_bodies': sorted(loads), 'target_contact_forces_n': loads,
-                             'commands': action.parameters}
+                             'commands': action.parameters, 'lift_progress': lift_progress}
                     rows.append(state)
                     stage_rows.append(state)
                     if len(rows) % 2 == 0:
@@ -297,6 +321,7 @@ def main():
         print('initial', initial.tolist(), 'table edge/top', [edge, top], flush=True)
         result = {'trial_id':trial['trial_id'], 'approach':args.approach,
                   'target_mass_kg':float(model.body_mass[target]),
+                  'hand_torque_limits_nm':hand_limits[raw.task.robot.right_hand_index - 1],
                   'target_initial_height_m':float(z), 'max_lift_m':max(z_values, default=z)-z,
                   'lift_and_hold_pass':len(hold) == 60 and clear_of_table
                   and min(row['target'][2] for row in hold[-25:]) - z >= .05,
