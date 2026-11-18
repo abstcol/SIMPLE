@@ -275,12 +275,12 @@ def main():
     position_gains = {side: np.array([arm_kp[model.joint(i).name] for i in range(model.njnt)
                                      if model.jnt_qposadr[i] in ik.arms[side][1]]) for side in SIDES}
 
-    def advance(stage, joint_goal, navigation, wrist_targets, video):
+    def advance(stage, joint_goal, navigation, wrist_targets, video, base_height=.74):
         nonlocal obs, loads, ended, official_success_step
         now = time.monotonic()
         policy.set_observation(agent._build_wbc_observation(raw.task.robot.prepare_obs()))
         policy.set_goal({'target_upper_body_pose': joint_goal[upper], 'navigate_cmd': navigation,
-                         'base_height_command': np.array([.74]),
+                         'base_height_command': np.array([base_height]),
                          'target_time': now + 1 / agent._control_frequency,
                          'interpolation_garbage_collection_time': now - 2 / agent._control_frequency,
                          'timestamp': now})
@@ -294,7 +294,7 @@ def main():
                  'container': info['container'].tolist(), 'official_success': bool(terminated),
                  'pelvis': data.qpos[:7].tolist(), 'reward': float(reward),
                  'wrists': [data.body(ik.arms[s][0]).xpos.tolist() for s in SIDES],
-                 'wrist_targets': wrist_targets, 'navigate_cmd': list(navigation),
+                 'wrist_targets': wrist_targets, 'navigate_cmd': list(navigation), 'base_height_command': base_height,
                  'target_contact_bodies': sorted(loads), 'target_contact_forces_n': loads,
                  'commands': action.parameters, 'lift_progress': lift_progress}
         rows.append(state)
@@ -311,65 +311,55 @@ def main():
         time.sleep(max(0, dt - (time.monotonic() - now)))
         return state
 
-    def carry_to_container(joint_goal, nominal_goal, video):
+    def carry_to_container(joint_goal, video):
         box = data.body(target)
-        destination = data.body(container).xpos.copy()
-        held_offset = yaw_rotation(data.qpos).T @ (box.xpos - data.qpos[:3])
-        stand_at = destination[:2] + held_offset[:2] + [.025, 0.]
+        basket = data.body(container)
+        carry_height = .74
         lost = 0
-        for _ in range(320):
+        for _ in range(365):
             heading = yaw_rotation(data.qpos)
-            backward = heading[0, 0] < -.65
-            world_velocity = np.clip(2.4 * (stand_at - data.qpos[:2]), [-.42, -.20], [.2, .20])
-            if not backward:
-                world_velocity[:] = [-.19, 0.] if data.qpos[0] > edge - .38 else [0., 0.]
-            if np.linalg.norm(data.qpos[:2] - stand_at) < .055 and heading[0, 0] < -.985:
-                break
+            facing_basket = heading[0, 0] < -.97
+            if facing_basket:
+                # Keep the grasp references fixed. Align the carried box by
+                # moving the base, and raise the base before crossing the rim.
+                carry_height = .74 + .065 * float(np.clip((-data.qpos[0] - 1.30) / .28, 0., 1.))
+                error = basket.xpos[:2] - box.xpos[:2]
+                if np.linalg.norm(error) < .045 and box.xpos[2] > .86:
+                    break
+                world_velocity = np.clip(2.5 * error, [-.40, -.18], [.18, .18])
+                if error[0] < -.045:
+                    world_velocity[0] = min(world_velocity[0], -.12)
+            else:
+                world_velocity = [-.19, 0.] if data.qpos[0] > edge - .38 else [0., 0.]
             local_velocity = heading[:2, :2].T @ world_velocity
-            advance('carry', joint_goal, [*local_velocity, 1., -np.pi], None, video)
+            advance('carry', joint_goal, [*local_velocity, 1., -np.pi], None, video, carry_height)
             lost = lost + 1 if not any('hand' in body or 'wrist' in body for body in loads) else 0
             if ended or lost >= 10:
                 print('Carry stopped after contact loss or episode termination.', flush=True)
                 return
-            if official_success_step is not None:
-                break
-        if np.linalg.norm(data.qpos[:2] - stand_at) >= .12:
-            print('The robot did not reach the placement stance.', flush=True)
+        else:
+            print('The box did not reach the release pose over the container.', flush=True)
             return
 
         heading = yaw_rotation(data.qpos)
-        origins = ik.wrist_poses(data, nominal_goal)
-        delta = destination - box.xpos
-        delta[2] = 0.
-        delta[:2] = np.clip(delta[:2], -.12, .12)
-        raise_box = np.array([0., 0., max(.04, .99 - box.xpos[2])])
-        for stage, steps in [('raise_at_destination', 35), ('align', 55), ('release', 55), ('settle', 25)]:
-            destination = data.body(container).xpos.copy()
-            if stage == 'release' and np.linalg.norm(box.xpos[:2] - destination[:2]) > .09:
-                print('Placement stopped because the box was not aligned with the container.', flush=True)
+        origins = ik.wrist_poses(data, joint_goal)
+        joint_goal = joint_goal.copy()
+        for step in range(65):
+            progress = min(1., (step + 1) / 36.)
+            smooth = progress**2 * (3. - 2. * progress)
+            targets = []
+            for side, sign, (p, r) in zip(SIDES, (1, -1), origins):
+                # First clear the sides. Then draw the hands back from the rim.
+                retreat = .05 * max(0., (smooth - .4) / .6)
+                goal = p + heading @ [-retreat, sign * .09 * smooth, .02 * smooth]
+                targets.append(goal.tolist())
+                indices, q = ik.solve(side, data, goal, r, joint_goal)
+                joint_goal[indices] += np.clip(q - joint_goal[indices], -.055, .055)
+            advance('release' if step < 36 else 'settle', joint_goal,
+                    [0., 0., 0., -np.pi], targets, video, carry_height)
+            if ended:
                 return
-            for step in range(steps):
-                progress = (step + 1) / steps
-                smooth = progress**2 * (3. - 2. * progress)
-                joint_goal = nominal_goal.copy()
-                targets = []
-                for side, sign, (p, r) in zip(SIDES, (1, -1), origins):
-                    opening = smooth if stage == 'release' else float(stage == 'settle')
-                    retreat = heading @ [-.045, sign * .075, .01] * opening
-                    translation = raise_box * (smooth if stage == 'raise_at_destination' else 1.)
-                    if stage != 'raise_at_destination':
-                        translation += delta * (smooth if stage == 'align' else 1.)
-                    target_pos = p + translation + retreat
-                    targets.append(target_pos.tolist())
-                    indices, q = ik.solve(side, data, target_pos, r, nominal_goal)
-                    nominal_goal[indices] += np.clip(q - nominal_goal[indices], -.055, .055)
-                    joint_goal[indices] = nominal_goal[indices]
-                    force_scale = 1. - opening
-                    force = heading @ np.array([-8., -sign * 16., 4.]) * force_scale
-                    ik.press(side, data, joint_goal, force, position_gains[side])
-                advance(stage, joint_goal, [0., 0., 0., -np.pi], targets, video)
-                if ended:
-                    return
+
     try:
         with imageio.get_writer(args.output / 'overview.mp4', fps=25, codec='libx264') as video:
             for name, steps, goals in stages:
@@ -469,7 +459,7 @@ def main():
                     break
             if args.carry and not ended and held_above_table(rows, z):
                 print('Lift passed. Starting transport and placement.', flush=True)
-                carry_to_container(joint_goal, full_goal.copy(), video)
+                carry_to_container(joint_goal, video)
     finally:
         renderer.close()
         env.close()
