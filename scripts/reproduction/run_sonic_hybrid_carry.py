@@ -258,7 +258,9 @@ def run(args, trial):
             for step in range(250):
                 robot.elastic_band.length = -.20 * min(1., step / 175)
                 tick('startup', None)
-            startup_support = 0.
+            for step in range(75):
+                startup_support = 1. - (step + 1) / 75
+                tick('release_crane', None)
             data.xfrc_applied[robot.band_attached_link] = 0.
             for _ in range(90):
                 tick('settle', None)
@@ -274,7 +276,7 @@ def run(args, trial):
                         ('cup', 110, cradle(.045, .046), None),
                         ('preload', 85, cradle(.033, .046), None)]
             for phase, count, goals, base_goal in approach:
-                if not rows[-1]['standing']:
+                if not rows[-1]['standing'] or np.linalg.norm(data.body(target).xpos - initial) > .04:
                     break
                 if not move(phase, count, goals, follow_box=phase in ('cup', 'preload'), stage_base=base_goal):
                     break
@@ -294,7 +296,7 @@ def run(args, trial):
             write_json(args.output / 'trajectory.json', rows)
             result = dict(trial_id=trial['trial_id'], mass_scale=args.mass,
                           target_mass_kg=float(model.body_mass[target]), initial_xyz_m=initial.tolist(),
-                          max_lift_m=max((row['displacement_m'][2] for row in rows), default=0.),
+                          max_lift_m=max(0., max((row['displacement_m'][2] for row in rows), default=0.)),
                           lift_and_hold_pass=lift_pass(rows), task_success=any(r['task_success'] for r in rows),
                           steps=len(rows), hand_torque_limits_nm=limits.tolist())
             write_json(args.output / 'result.json', result)
