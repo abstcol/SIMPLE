@@ -130,7 +130,7 @@ def held_above_table(rows, initial_height):
 def placed_in_container(rows, container_name):
     window = rows[-20:]
     return len(window) == 20 and all(
-        row['stage'] in ('release', 'settle') and container_name in row['target_contact_bodies']
+        row['stage'] == 'settle' and container_name in row['target_contact_bodies']
         and not any(body.startswith(('left_', 'right_')) and ('hand' in body or 'wrist' in body)
                     for body in row['target_contact_bodies'])
         and np.linalg.norm(np.array(row['target'][:2]) - row['container'][:2]) < .10
@@ -259,7 +259,7 @@ def main():
                  'commands': action.parameters, 'lift_progress': lift_progress}
         rows.append(state)
         if len(rows) % 2 == 0:
-            if stage in ('carry', 'raise_at_destination', 'align', 'release', 'settle'):
+            if stage in ('carry', 'release', 'settle'):
                 camera.lookat[:] = [data.qpos[0], data.qpos[1], .68]
             renderer.update_scene(data, camera=camera)
             video.append_data(renderer.render())
@@ -318,7 +318,7 @@ def main():
                 joint_goal[indices] += np.clip(q - joint_goal[indices], -.055, .055)
             advance('release' if step < release_steps else 'settle', joint_goal,
                     [0., 0., 0., -np.pi], targets, video, carry_height)
-            if ended or (step >= release_steps and placed_in_container(rows, container_name)):
+            if ended or placed_in_container(rows, container_name):
                 return
 
     try:
