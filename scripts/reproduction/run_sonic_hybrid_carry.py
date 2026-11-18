@@ -254,10 +254,19 @@ def run(args, trial):
                 if not rows[-1]['standing']:
                     break
             last_goals = current_wrists()
-            stage_base = np.array([edge - .22, initial[1]])
-            if rows[-1]['standing'] and move('approach', 125, cradle(.145, .076), stage_base=stage_base):
-                if move('cup', 110, cradle(.045, .046), stage_base=stage_base):
-                    move('preload', 85, cradle(.033, .046), follow_box=True, stage_base=stage_base)
+            stage_base = np.array([edge - .19, initial[1]])
+            clearance = [(np.array([edge - .18, initial[1] + sign * .24, top + .31]),
+                          Rotation.identity()) for sign in (1, -1)]
+            approach = [('clear', 80, clearance, stage_base),
+                        ('approach', 115, cradle(.24, .25), stage_base),
+                        ('lower', 115, cradle(.22, .055), None),
+                        ('cup', 110, cradle(.045, .046), None),
+                        ('preload', 85, cradle(.033, .046), None)]
+            for phase, count, goals, base_goal in approach:
+                if not rows[-1]['standing']:
+                    break
+                if not move(phase, count, goals, follow_box=phase in ('cup', 'preload'), stage_base=base_goal):
+                    break
             if rows[-1]['standing'] and rows[-1]['phase'] == 'preload':
                 lifted = cradle(.033, .175)
                 if move('lift', 145, lifted, follow_box=True):
