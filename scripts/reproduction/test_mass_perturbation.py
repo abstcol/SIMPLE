@@ -6,7 +6,6 @@ import numpy as np
 import pytest
 
 from simple.assets.primitive import Box, Cube
-from simple.core.actor import ObjectActor
 from simple.core.layout import Layout
 from simple.dr.physics import MassPerturbation
 from simple.engines.mujoco import MujocoSimulator
@@ -92,3 +91,45 @@ def test_enabled_requires_a_target_before_scene_build():
     sim = MujocoSimulator(SimpleNamespace(metadata={}, layout=Layout()), physics={'enabled': True})
     with pytest.raises(ValueError, match='target'):
         sim.update_layout()
+
+
+def test_articulated_mass_scales_only_the_chair_and_rebuilds_from_nominal(tmp_path):
+    asset_path = tmp_path / 'chair.xml'
+    asset_path.write_text("""
+        <mujoco>
+          <worldbody>
+            <body name="articulate_base" pos="0 0 0.2">
+              <freejoint name="articulate_floating_base"/>
+              <geom name="seat" type="box" size=".1 .1 .04" mass="2"/>
+              <body name="wheel" pos=".05 0 -.1">
+                <joint name="articulate_joint_0" axis="0 1 0"/>
+                <geom type="sphere" size=".04" mass=".5"/>
+              </body>
+            </body>
+          </worldbody>
+        </mujoco>
+    """)
+    layout = Layout()
+    layout.add_object('target', Cube(size=.04))
+    layout.add_articulated_object(
+        'articulated', SimpleNamespace(uid='chair', mjcf_path=str(asset_path), articulate_init_joint_qpos=None))
+    task = SimpleNamespace(layout=layout, metadata={'need_gravity': True}, robot=NoControl())
+    sim = MujocoSimulator(task)
+    sim.update_layout(sonic_config={})
+    baseline = sim.mjModel
+    root = baseline.body('articulate_base').id
+    chair = baseline.body_rootid == root
+    assert np.count_nonzero(chair) == 2
+    assert baseline.body_subtreemass[root] == pytest.approx(2.5)
+
+    for scale in (1, 5, 10, 1):
+        sim.mass_perturbation = MassPerturbation(True, scale, actor='articulated')
+        sim.update_layout(sonic_config={})
+        current = sim.mjModel
+        assert current.body_subtreemass[root] == pytest.approx(2.5 * scale)
+        np.testing.assert_array_equal(current.body_mass[chair], baseline.body_mass[chair] * scale)
+        np.testing.assert_array_equal(current.body_inertia[chair], baseline.body_inertia[chair] * scale)
+        np.testing.assert_array_equal(current.body_mass[~chair], baseline.body_mass[~chair])
+        np.testing.assert_array_equal(current.body_inertia[~chair], baseline.body_inertia[~chair])
+        for field in ('body_ipos', 'body_iquat', 'geom_friction', 'geom_size', 'jnt_dofadr', 'dof_damping'):
+            np.testing.assert_array_equal(getattr(current, field), getattr(baseline, field))

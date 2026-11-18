@@ -92,6 +92,21 @@ env -u LD_LIBRARY_PATH nix --extra-experimental-features 'nix-command flakes' de
   --headless
 ```
 
+## SIMPLE-Phys
+
+Use `--physics-config physics.json` to apply a per-episode mass setting. For
+`simple/G1WholebodyPushOfficeChairTeleop-v0`, select the chair as the
+`articulated` actor.
+
+```json
+{"mass": {"scale": 5, "actor": "articulated"}}
+```
+
+This scales the mass and inertia of each chair link during scene setup. With
+`"scale": 1` the chair has nominal mass. Omitting `actor` selects the rigid
+`target`, which is a separate prop in this task. Use the same scene and
+checkpoint for each scale.
+
 ## Results and videos
 
 Task success rate statistics are printed on completion and preserved in a log:

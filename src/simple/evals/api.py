@@ -29,6 +29,7 @@ class EvalConfig:
     video_dir: str = "data/evals"  # eval videos go to <video_dir>/<policy>/<task>/<dr>
     trailing_episode_steps: int = 50  # control steps run (and recorded) after an episode terminates, not after a truncation
     isaac_render: str = "always"  # "on-query": render Isaac only on steps whose images the agent reads
+    physics: dict | None = None
 
 
 @dataclass

@@ -27,6 +27,7 @@ class SuiteTest(unittest.TestCase):
                         {'mass_scale': float('nan')}, {'mass_scale': float('inf')}, {'role': 'target'},
                         {'mass': 2}, {'mass': {}}, {'mass': {'scale': 0}},
                         {'mass': {'scale': True}}, {'mass': {'scale': 10**400}},
+                        {'mass': {'scale': 2, 'actor': 'robot'}},
                         {'mass': {'scale': 2, 'extra': 1}}, {'mass': {'scale': 2}, 'enabled': False}):
             record = trial()
             record['physics'] = physics
@@ -43,6 +44,11 @@ class SuiteTest(unittest.TestCase):
                 suite.validate_manifest([record])
                 mass = PhysicsConfig.from_dict(physics).mass
                 self.assertEqual((mass.enabled, mass.effective_scale), (enabled, scale))
+                self.assertEqual(mass.actor, 'target')
+        chair = trial()
+        chair['physics'] = {'mass': {'scale': 5, 'actor': 'articulated'}}
+        suite.validate_manifest([chair])
+        self.assertEqual(PhysicsConfig.from_dict(chair['physics']).mass.actor, 'articulated')
 
     def test_task_session_persists_error_accounting_before_kit_shutdown(self):
         with TemporaryDirectory() as temp:

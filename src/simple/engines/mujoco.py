@@ -130,8 +130,11 @@ class MujocoSimulator(Simulator):
         from simple.core.actor import RobotActor, ObjectActor, ArticulatedObjectActor, CameraEntity
         from simple.assets.primitive import Primitive
 
-        if self.mass_perturbation.enabled and not isinstance(self.task.layout.actors.get('target'), ObjectActor):
-            raise ValueError('Mass perturbation requires a rigid ObjectActor named target')
+        mass = self.mass_perturbation
+        if mass.enabled:
+            actor_type = ObjectActor if mass.actor == 'target' else ArticulatedObjectActor
+            if not isinstance(self.task.layout.actors.get(mass.actor), actor_type):
+                raise ValueError(f'Physics mass scaling requires a {actor_type.__name__} named {mass.actor}')
 
         # https://mujoco.readthedocs.io/en/stable/computation/index.html
         # https://mujoco.readthedocs.io/en/stable/modeling.html#preventing-slip
@@ -158,7 +161,7 @@ class MujocoSimulator(Simulator):
                 # This is a string, which means it's a name of an asset
                 # asset = self.task.layout.assets[actor]
                 # actor = Actor.from_asset(asset)
-                scale = self.mass_perturbation.effective_scale if objtype == 'target' else 1.0
+                scale = mass.effective_scale if objtype == mass.actor else 1.0
                 self._build_object(mjSpec, mj_worldbody, actor, mass_scale=scale)
             elif isinstance(actor, RobotActor):
                 self._build_robot(mjSpec, mj_worldbody, actor) # HACK make sure called first
@@ -224,6 +227,9 @@ class MujocoSimulator(Simulator):
         self.mjModel=mjSpec.compile()
         self.mjData=mujoco.MjData(self.mjModel)
         self.mjSpec=mjSpec
+
+        if mass.enabled and mass.actor == 'articulated':
+            self._scale_articulated_mass(mass.mass_scale)
 
         self.mjModel.opt.gravity = (0, 0, -9.81 if self.need_gravity else 0)
 
@@ -389,6 +395,21 @@ class MujocoSimulator(Simulator):
             solref=[0.005, 2],
         )
         mj_obj.add_freejoint(name=f"{label}_joint")
+
+    def _scale_articulated_mass(self, scale):
+        model = self.mjModel
+        joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, 'articulate_floating_base')
+        if joint_id < 0 or model.jnt_type[joint_id] != mujoco.mjtJoint.mjJNT_FREE:
+            raise ValueError('Physics mass scaling for articulated requires a floating base')
+        if scale == 1.0:
+            return
+        # Scale the compiled inertials of every link, including inferred masses.
+        root = model.jnt_bodyid[joint_id]
+        links = model.body_rootid == root
+        model.body_mass[links] *= scale
+        model.body_inertia[links] *= scale
+        mujoco.mj_setConst(model, self.mjData)
+        mujoco.mj_resetData(model, self.mjData)
 
     def _build_articulated_object(self, mjSpec, mjWorld, actor: ArticulatedObjectActor):
         """Build the articulated object in the Mujoco simulator."""
