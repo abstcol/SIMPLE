@@ -31,10 +31,11 @@ NEUTRAL_HEAD = [0., 0., .40]
 WRIST_OFFSETS = ([.18, -.025, 0.], [.18, .025, 0.])
 
 
-def planner_packet(base, wrists, movement, speed, facing):
+def planner_packet(base, wrists, movement, speed, facing, hands):
     """Convert world-frame wrist-link targets to the native three-point input."""
+    fingers = dict(left_hand_position=hands[0], right_hand_position=hands[1])
     if wrists is None:
-        return build_planner_message(IDLE, (0., 0., 0.), facing)
+        return build_planner_message(IDLE, (0., 0., 0.), facing, **fingers)
     to_local = Rotation.from_quat(base[3:7], scalar_first=True).inv()
     positions, orientations = [], []
     for (position, rotation), offset in zip(wrists, WRIST_OFFSETS):
@@ -46,7 +47,7 @@ def planner_packet(base, wrists, movement, speed, facing):
     return build_planner_message(
         SLOW_WALK if speed else IDLE, movement, facing,
         speed=speed if speed else -1.,
-        left_hand_position=[0.] * 7, right_hand_position=[0.] * 7,
+        **fingers,
         vr_3pt_position=positions + NEUTRAL_HEAD,
         vr_3pt_orientation=orientations + [1., 0., 0., 0.],
     )
@@ -112,6 +113,16 @@ def run(args, trial):
     limits = robot.torque_limit[np.stack((robot.left_hand_index, robot.right_hand_index)) - 1]
     np.testing.assert_allclose(limits, [[2.45, .7, .7, .7, .7, .7, .7]] * 2)
 
+    closed_hands = []
+    for side in SIDES:
+        cfg = getattr(robot.controller_cfg, f'{side}_eef_cfg')
+        joints = getattr(robot, f'{side}_hand_index')
+        targets = dict(zip(cfg.joint_names, cfg.close_qpos))
+        values = [targets[model.joint(int(i)).name] for i in joints]
+        data.qpos[joints + robot.qpos_offset - 1] = values
+        closed_hands.append(values)
+    open_hands = [[0.] * 7] * 2
+
     def current_wrists():
         return [(data.body(wrist).xpos.copy(),
                  Rotation.from_matrix(data.body(wrist).xmat.reshape(3, 3))) for wrist in wrists]
@@ -134,6 +145,7 @@ def run(args, trial):
     model.vis.global_.offwidth = max(640, model.vis.global_.offwidth)
     model.vis.global_.offheight = max(480, model.vis.global_.offheight)
     rows, frames = [], []
+    contact_impulse = {}
     facing = (1., 0., 0.)
     heartbeat_stop = threading.Event()
     heartbeat = threading.Thread(target=publish_state, daemon=True)
@@ -149,6 +161,8 @@ def run(args, trial):
     def pace_substep():
         nonlocal next_substep
         bridge.PublishLowState(robot.prepare_obs())
+        for name, force in forces_on_target(model, data, target).items():
+            contact_impulse[name] = contact_impulse.get(name, np.zeros(3)) + force * raw.mujoco.physics_dt
         if startup_support:
             warmup_crane()
         next_substep += raw.mujoco.physics_dt
@@ -196,7 +210,7 @@ def run(args, trial):
             proprio = robot_state()
             for _ in range(5):
                 pub.send(build_command_message(start=True, stop=False, planner=True))
-                pub.send(planner_packet(data.qpos[:7], None, (0., 0., 0.), 0., facing))
+                pub.send(planner_packet(data.qpos[:7], None, (0., 0., 0.), 0., facing, closed_hands))
                 time.sleep(.02)
             heartbeat_stop.set()
             heartbeat.join()
@@ -216,7 +230,9 @@ def run(args, trial):
                     if distance > .035:
                         movement = (*list(error / distance), 0.)
                         speed = float(np.clip(1.5 * distance, .10, .19))
-                pub.send(planner_packet(data.qpos[:7], goals, movement, speed, facing))
+                hands = closed_hands if phase in ('startup', 'release_crane', 'settle', 'clear') else open_hands
+                pub.send(planner_packet(data.qpos[:7], goals, movement, speed, facing, hands))
+                contact_impulse.clear()
                 action.parameters.update(low_cmd=bridge.low_cmd, left_hand_cmd=bridge.left_hand_cmd,
                                          right_hand_cmd=bridge.right_hand_cmd)
                 _, _, terminated, _, _ = env.step(action)
@@ -230,6 +246,7 @@ def run(args, trial):
                                  standing=bool(data.qpos[2] > .54),
                                  task_success=bool(terminated),
                                  contacts_n={key: force.tolist() for key, force in contacts.items()},
+                                 contact_impulse_ns={key: impulse.tolist() for key, impulse in contact_impulse.items()},
                                  wrists_xyz_m=[p.tolist() for p, _ in current_wrists()],
                                  wrist_targets_m=[p.tolist() for p, _ in (goals or [])]))
                 if len(rows) % 2 == 0:
