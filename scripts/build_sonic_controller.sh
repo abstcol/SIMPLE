@@ -80,7 +80,7 @@ export TensorRT_ROOT
 echo "   TensorRT_ROOT=$TensorRT_ROOT"
 
 step "onnxruntime (official prebuilt)"
-ORT="$BASE/onnxruntime-linux-x64-gpu-1.22.0"
+ORT="${onnxruntime_ROOT:-$BASE/onnxruntime-linux-x64-gpu-1.22.0}"
 [[ -d "$ORT" ]] || curl -fsSL --retry 3 \
   https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-linux-x64-gpu-1.22.0.tgz \
   | tar xz -C "$BASE"
