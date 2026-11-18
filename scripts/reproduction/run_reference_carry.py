@@ -1,4 +1,4 @@
-"""Test a geometric support grasp using the original GR00T-WBC and a frozen trial."""
+"""Check two-arm support using simulator state, a frozen trial and the existing GR00T-WBC."""
 
 import argparse
 import json
@@ -324,12 +324,11 @@ def main():
     try:
         with imageio.get_writer(args.output / 'overview.mp4', fps=25, codec='libx264') as video:
             for name, steps, goals in stages:
-                # Interpolate the wrists from their actual poses at stage entry.
                 origins = [(data.body(ik.arms[side][0]).xpos.copy(),
                             data.body(ik.arms[side][0]).xmat.reshape(3, 3).copy()) for side in SIDES]
                 pressing = name in ('preload', 'lift', 'hold')
                 if pressing:
-                    # Restarting from the measured pose would unload the hands.
+                    # Continue from the commanded pose to preserve arm preload.
                     origins = previous_goals
                 stage_rows = []
                 for step in range(steps):

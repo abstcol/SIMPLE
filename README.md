@@ -42,20 +42,21 @@ outputs, explicit compatibility options and interpretation of success rates.
 
 ## SIMPLE-Phys
 
-The [project overview](docs/projects/simple-phys-project.md) records the research
-scope, verified mass sweeps, nominal task baselines and next steps. Target mass
-scaling is implemented; COM and contact-friction perturbations remain planned.
-The [evaluation guide](scripts/reproduction/pi05-suite.md#simple-phys-target-mass-switch)
-documents the existing switch. Experiments retain task definitions and explicitly
-record controller/hand profiles; current pressure tests are not an expert-screened
-paper benchmark.
+The [project overview](docs/projects/simple-phys-project.md) tracks the research
+scope, AMO and GR00T mass sweeps, and next steps. Use the
+[mass switch](scripts/reproduction/pi05-suite.md#simple-phys-target-mass-switch)
+to run pretrained policies with different target masses. The
+[reference carry script](scripts/reproduction/README.md#reference-carry) uses
+simulator state to check whether the existing GR00T controller can execute a
+two-arm support strategy. It has been verified on one frozen 10× carry scene.
+Center-of-mass and contact-friction perturbations remain planned.
 
 ## Repository layout
 
 | Path | Purpose |
 |---|---|
 | `src/simple/` | Simulation, robots, controllers, tasks and policy interfaces |
-| `scripts/reproduction/` | Input preparation, batch launcher, evaluator, model server and tests |
+| `scripts/reproduction/` | Policy evaluation, reference carry, diagnostics and tests |
 | `third_party/` | Pinned upstream dependencies; retain their licenses |
 | `data/` | Local assets, weights and task metadata; large files are not committed |
 | `experiments/reproduction/` | Local run outputs; not committed |
