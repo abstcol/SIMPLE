@@ -79,12 +79,33 @@ def wrist_goal(point, roll=0., pitch=0., yaw=0., reach=.14):
     return np.asarray(point) - reach * rotation[:, 0], rotation
 
 
+def forces_on_target(model, data, target):
+    """Sum measured world-frame forces applied to the box by each body."""
+    forces = {}
+    wrench = np.zeros(6)
+    for i, contact in enumerate(data.contact[:data.ncon]):
+        a, b = model.geom_bodyid[[contact.geom1, contact.geom2]]
+        if target not in (a, b):
+            continue
+        other = model.body(int(b if a == target else a)).name
+        mujoco.mj_contactForce(model, data, i, wrench)
+        world = contact.frame.reshape(3, 3).T @ wrench[:3]
+        forces[other] = forces.get(other, np.zeros(3)) + (-world if a == target else world)
+    return forces
+
+
+def lateral_pressure(forces, side, sign):
+    return -sign * sum(force[1] for name, force in forces.items()
+                       if name.startswith(side + '_') and ('hand' in name or 'wrist' in name))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--manifest', type=Path, required=True)
     parser.add_argument('--trial', required=True)
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--approach', choices=('table-edge', 'bimanual-cradle', 'deep-cradle'), default='table-edge')
+    parser.add_argument('--approach', choices=('table-edge', 'bimanual-cradle', 'deep-cradle', 'loaded-cradle'),
+                        default='loaded-cradle')
     args = parser.parse_args()
     records = validate_manifest(json.loads(args.manifest.read_text()))
     trial = next((row for row in records if row['trial_id'] == args.trial), None)
@@ -151,10 +172,11 @@ def main():
         ('lift', 100, (left_lift, right_support)),
         ('hold', 60, (left_lift, right_support)),
     ]
-    if args.approach in ('bimanual-cradle', 'deep-cradle'):
+    loaded = args.approach == 'loaded-cradle'
+    if args.approach in ('bimanual-cradle', 'deep-cradle', 'loaded-cradle'):
         # Angle both palms upward and approach the lower corners from the sides.
         # The fingers are open. The arms move the palms inward and then upward.
-        deep = args.approach == 'deep-cradle'
+        deep = args.approach != 'bimanual-cradle'
 
         def cradle(clearance, height, forward=0.):
             return tuple(wrist_goal([x + forward, y + sign * clearance, top + height],
@@ -171,6 +193,14 @@ def main():
             clear = tuple(wrist_goal([edge - .035, y + sign * .24, top + .28], reach=.10)
                           for sign in (1, -1))
             stages[:0] = [('clear_box', 80, clear), ('step_closer', 125, clear)]
+        if loaded:
+            cup = cradle(.044, .05)
+            # Carry the commanded wrist pose across the phase boundary. The
+            # measured pose while pressing encodes deflection and would unload
+            # the contact if used as a fresh setpoint.
+            stages[-2:] = [('preload', 80, cup),
+                           ('lift', 200, tuple((p + [0, 0, .13], r) for p, r in cup)),
+                           ('hold', 60, tuple((p + [0, 0, .13], r) for p, r in cup))]
     model.vis.global_.offwidth = max(640, model.vis.global_.offwidth)
     model.vis.global_.offheight = max(480, model.vis.global_.offheight)
     renderer = mujoco.Renderer(model, height=480, width=640)
@@ -179,19 +209,39 @@ def main():
     camera.lookat[:] = [edge - .08, y, .66]
     rows = []
     ended = False
+    previous_goals = None
+    squeeze = np.zeros(2)
+    lift_progress = 0
+    loads = {}
     try:
         with imageio.get_writer(args.output / 'overview.mp4', fps=25, codec='libx264') as video:
             for name, steps, goals in stages:
                 # Interpolate the wrists from their actual poses at stage entry.
                 origins = [(data.body(ik.arms[side][0]).xpos.copy(),
                             data.body(ik.arms[side][0]).xmat.reshape(3, 3).copy()) for side in SIDES]
+                pressing = loaded and name in ('preload', 'lift', 'hold')
+                if pressing:
+                    origins = previous_goals
                 stage_rows = []
                 for step in range(steps):
                     fraction = min(1., (step + 1) / (steps * .80))
+                    pressure = np.array([lateral_pressure(loads, side, sign)
+                                         for side, sign in zip(SIDES, (1, -1))])
+                    if pressing:
+                        squeeze = np.clip(squeeze + .00018 * np.clip(7. - pressure, -4., 7.), 0., .037)
+                    if loaded and name == 'lift':
+                        if pressure.min() >= 3. or loads.get('table', np.zeros(3))[2] < 2.:
+                            lift_progress += 1
+                        fraction = min(1., lift_progress / 100.)
                     fraction = fraction**2 * (3 - 2 * fraction)
-                    for side, (p0, r0), (p1, r1) in zip(SIDES, origins, goals):
+                    commanded_wrists = []
+                    for i, (side, (p0, r0), (p1, r1)) in enumerate(zip(SIDES, origins, goals)):
                         axis = Rotation.from_matrix(r1 @ r0.T).as_rotvec()
-                        ids, values = ik.solve(side, data, p0 + fraction * (p1 - p0),
+                        position = p0 + fraction * (p1 - p0)
+                        if pressing:
+                            position[1] += (-1 if side == 'left' else 1) * squeeze[i]
+                        commanded_wrists.append(position.tolist())
+                        ids, values = ik.solve(side, data, position,
                                                Rotation.from_rotvec(fraction * axis).as_matrix() @ r0,
                                                full_goal)
                         full_goal[ids] += np.clip(values - full_goal[ids], -.055, .055)
@@ -209,16 +259,13 @@ def main():
                                        left_hand_q=robot_model.get_hand_actuated_joints(q, side='left'),
                                        right_hand_q=robot_model.get_hand_actuated_joints(q, side='right'))
                     obs, reward, terminated, truncated, info = env.step(action)
-                    touch_bodies = set()
-                    for contact in data.contact[:data.ncon]:
-                        a, b = model.geom_bodyid[[contact.geom1, contact.geom2]]
-                        if a == target or b == target:
-                            touch_bodies.add(model.body(int(b if a == target else a)).name)
+                    loads = forces_on_target(model, data, target)
                     state = {'stage': name, 'step': len(rows) + 1, 'target': info['target'].tolist(),
                              'pelvis': data.qpos[:7].tolist(), 'reward':float(reward),
                              'wrists': [data.body(ik.arms[s][0]).xpos.tolist() for s in SIDES],
-                             'wrist_targets': [p.tolist() for p, _ in goals],
-                             'target_contact_bodies': sorted(touch_bodies), 'commands': action.parameters}
+                             'wrist_targets': commanded_wrists,
+                             'target_contact_bodies': sorted(loads), 'target_contact_forces_n': loads,
+                             'commands': action.parameters}
                     rows.append(state)
                     stage_rows.append(state)
                     if len(rows) % 2 == 0:
@@ -229,7 +276,12 @@ def main():
                         break
                     time.sleep(max(0, dt - (time.monotonic() - now)))
                 print(name, 'target', np.round(stage_rows[-1]['target'][:3], 3).tolist(),
-                      'wrists', np.round(stage_rows[-1]['wrists'], 3).tolist(), flush=True)
+                      'wrists', np.round(stage_rows[-1]['wrists'], 3).tolist(),
+                      'contacts', {body: np.round(force, 1).tolist() for body, force in loads.items()}, flush=True)
+                previous_goals = goals
+                if loaded and name == 'lift' and lift_progress < 100:
+                    print('Lift paused because the hands did not maintain inward pressure.', flush=True)
+                    break
                 if ended:
                     break
     finally:
