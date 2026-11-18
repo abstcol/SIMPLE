@@ -34,8 +34,9 @@ WRIST_OFFSETS = ([.18, -.025, 0.], [.18, .025, 0.])
 def planner_packet(base, wrists, movement, speed, facing, hands):
     """Convert world-frame wrist-link targets to the native three-point input."""
     fingers = dict(left_hand_position=hands[0], right_hand_position=hands[1])
+    mode = SLOW_WALK if speed else IDLE
     if wrists is None:
-        return build_planner_message(IDLE, (0., 0., 0.), facing, **fingers)
+        return build_planner_message(mode, movement, facing, speed=speed or -1., **fingers)
     to_local = Rotation.from_quat(base[3:7], scalar_first=True).inv()
     positions, orientations = [], []
     for (position, rotation), offset in zip(wrists, WRIST_OFFSETS):
@@ -45,7 +46,7 @@ def planner_packet(base, wrists, movement, speed, facing, hands):
         positions.extend(point)
         orientations.extend((to_local * rotation).as_quat(scalar_first=True))
     return build_planner_message(
-        SLOW_WALK if speed else IDLE, movement, facing,
+        mode, movement, facing,
         speed=speed if speed else -1.,
         **fingers,
         vr_3pt_position=positions + NEUTRAL_HEAD,
@@ -230,7 +231,7 @@ def run(args, trial):
                     if distance > .035:
                         movement = (*list(error / distance), 0.)
                         speed = float(np.clip(1.5 * distance, .10, .19))
-                hands = closed_hands if phase in ('startup', 'release_crane', 'settle', 'clear') else open_hands
+                hands = closed_hands if phase in ('startup', 'release_crane', 'settle', 'position', 'clear') else open_hands
                 pub.send(planner_packet(data.qpos[:7], goals, movement, speed, facing, hands))
                 contact_impulse.clear()
                 action.parameters.update(low_cmd=bridge.low_cmd, left_hand_cmd=bridge.left_hand_cmd,
@@ -252,7 +253,7 @@ def run(args, trial):
                 if len(rows) % 2 == 0:
                     frames.append(data.qpos.copy())
 
-            def move(phase, steps, goals, follow_box=False, stage_base=None):
+            def move(phase, steps, goals, follow_box=False):
                 origins = last_goals
                 for step in range(steps):
                     ratio = (step + 1) / steps
@@ -263,7 +264,7 @@ def run(args, trial):
                     targets = [(p0 + fraction * (p1 + shift - p0),
                                 Rotation.from_rotvec(fraction * (r1 * r0.inv()).as_rotvec()) * r0)
                                for (p0, r0), (p1, r1) in zip(origins, goals)]
-                    tick(phase, targets, stage_base=stage_base)
+                    tick(phase, targets)
                     if not rows[-1]['standing']:
                         break
                 print(phase, rows[-1]['displacement_m'], list(rows[-1]['contacts_n']), flush=True)
@@ -283,24 +284,33 @@ def run(args, trial):
                 tick('settle', None)
                 if not rows[-1]['standing']:
                     break
+            # Finish all commanded stepping before adding upper-body targets.
+            stage_base = np.array([edge - .18, initial[1]])
+            for _ in range(95):
+                if not rows[-1]['standing'] or np.linalg.norm(stage_base - data.qpos[:2]) <= .035:
+                    break
+                tick('position', None, stage_base=stage_base)
+            for _ in range(50):
+                if not rows[-1]['standing']:
+                    break
+                tick('settle', None)
             last_goals = current_wrists()
-            stage_base = np.array([edge - .19, initial[1]])
             clearance = [(np.array([edge - .18, initial[1] + sign * .24, top + .31]),
                           Rotation.identity()) for sign in (1, -1)]
-            approach = [('clear', 80, clearance, stage_base),
-                        ('approach', 115, cradle(.24, .25), stage_base),
-                        ('lower', 115, cradle(.22, .055), None),
-                        ('cup', 110, cradle(.045, .046), None),
-                        ('preload', 85, cradle(.033, .046), None)]
-            for phase, count, goals, base_goal in approach:
+            approach = [('clear', 65, clearance),
+                        ('approach', 95, cradle(.24, .29)),
+                        ('lower', 85, cradle(.22, .055)),
+                        ('cup', 95, cradle(.045, .046)),
+                        ('preload', 65, cradle(.033, .046))]
+            for phase, count, goals in approach:
                 if not rows[-1]['standing'] or np.linalg.norm(data.body(target).xpos - initial) > .04:
                     break
-                if not move(phase, count, goals, follow_box=phase in ('cup', 'preload'), stage_base=base_goal):
+                if not move(phase, count, goals, follow_box=phase in ('cup', 'preload')):
                     break
             if rows[-1]['standing'] and rows[-1]['phase'] == 'preload':
                 lifted = cradle(.023, .175)
-                if move('lift', 145, lifted, follow_box=True):
-                    move('hold', 70, lifted, follow_box=True)
+                if move('lift', 125, lifted, follow_box=True):
+                    move('hold', 55, lifted, follow_box=True)
         finally:
             heartbeat_stop.set()
             heartbeat.join()
