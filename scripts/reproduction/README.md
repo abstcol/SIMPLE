@@ -59,3 +59,36 @@ includes `overview.mp4`, `trajectory.json` and `result.json`, which records the
 first official success separately from hands-free placement. The
 [SIMPLE-Phys project plan](../../docs/projects/simple-phys-project.md) records the
 verified scene and experiment evidence.
+
+### Native SONIC standing lift
+
+The standing-lift probe uses the same frozen two-table scene at both masses.
+A scripted expert sends navigation, two wrist poses, a fixed head reference and
+open-finger targets through the SONIC planner interface. The transport task's
+success condition is preserved. The probe additionally measures whether the box
+clears its initial position by 5 cm for 0.5 seconds, with bilateral arm contact
+and without table contact, during the hold.
+
+Use the project simulator environment and its source paths from
+[the 5090 setup](isaac-blackwell.md#local-activation-and-paths), with PyZMQ available.
+Install the encoder, decoder and planner using [NVIDIA's checkpoint
+instructions](https://nvlabs.github.io/GR00T-WholeBodyControl/getting_started/download_models.html).
+Keep the native build dependencies under the project.
+
+```bash
+export SONIC_TOOLS_DIR="$PWD/.tools/sonic"
+export UV_CACHE_DIR="$PWD/.cache/uv"
+export CMAKE_BUILD_PARALLEL_LEVEL=4
+bash scripts/build_sonic_controller.sh
+source "$SONIC_TOOLS_DIR/sonic_env.sh"
+
+for mass in 1 10; do
+  MUJOCO_GL=egl python scripts/reproduction/run_sonic_hybrid_carry.py \
+    --manifest PATH --trial episode_000_seed_0_mass_10 \
+    --mass "$mass" --output "experiments/reproduction/sonic-hybrid-lift/mass-$mass"
+done
+```
+
+Each run saves the input trial, world-frame contact forces, box displacement,
+wrist tracking, a lift result and a third-person MuJoCo video. The planner
+runs at wall-clock pace, as in native SONIC teleoperation.
