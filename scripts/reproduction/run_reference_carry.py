@@ -73,9 +73,9 @@ class WristIK:
         return policy_ids, scratch.qpos[qpos_ids].copy()
 
 
-def wrist_goal(point, roll=0., pitch=0., reach=.14):
+def wrist_goal(point, roll=0., pitch=0., yaw=0., reach=.14):
     """Position a point on the open hand along the wrist's local x-axis."""
-    rotation = Rotation.from_euler('xyz', [roll, pitch, 0], degrees=True).as_matrix()
+    rotation = Rotation.from_euler('xyz', [roll, pitch, yaw], degrees=True).as_matrix()
     return np.asarray(point) - reach * rotation[:, 0], rotation
 
 
@@ -84,6 +84,7 @@ def main():
     parser.add_argument('--manifest', type=Path, required=True)
     parser.add_argument('--trial', required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--approach', choices=('table-edge', 'bimanual-cradle'), default='table-edge')
     args = parser.parse_args()
     records = validate_manifest(json.loads(args.manifest.read_text()))
     trial = next((row for row in records if row['trial_id'] == args.trial), None)
@@ -150,6 +151,18 @@ def main():
         ('lift', 100, (left_lift, right_support)),
         ('hold', 60, (left_lift, right_support)),
     ]
+    if args.approach == 'bimanual-cradle':
+        # Angle both palms upward and approach the lower corners from the sides.
+        # The fingers are open. The arms move the palms inward and then upward.
+        def cradle(clearance, height, forward=0.):
+            return tuple(wrist_goal([x + forward, y + sign * clearance, top + height],
+                                    roll=-sign * 45, yaw=-sign * 22, reach=.13)
+                         for sign in (1, -1))
+
+        stages = [('approach', 100, cradle(.155, .07)),
+                  ('cup_lower_corners', 105, cradle(.058, .05)),
+                  ('lift', 100, cradle(.051, .18, -.01)),
+                  ('hold', 60, cradle(.051, .18, -.01))]
     model.vis.global_.offwidth = max(640, model.vis.global_.offwidth)
     model.vis.global_.offheight = max(480, model.vis.global_.offheight)
     renderer = mujoco.Renderer(model, height=480, width=640)
@@ -187,10 +200,16 @@ def main():
                                        left_hand_q=robot_model.get_hand_actuated_joints(q, side='left'),
                                        right_hand_q=robot_model.get_hand_actuated_joints(q, side='right'))
                     obs, reward, terminated, truncated, info = env.step(action)
+                    touch_bodies = set()
+                    for contact in data.contact[:data.ncon]:
+                        a, b = model.geom_bodyid[[contact.geom1, contact.geom2]]
+                        if a == target or b == target:
+                            touch_bodies.add(model.body(int(b if a == target else a)).name)
                     state = {'stage': name, 'step': len(rows) + 1, 'target': info['target'].tolist(),
                              'pelvis': data.qpos[:7].tolist(), 'reward':float(reward),
                              'wrists': [data.body(ik.arms[s][0]).xpos.tolist() for s in SIDES],
-                             'commands': action.parameters}
+                             'wrist_targets': [p.tolist() for p, _ in goals],
+                             'target_contact_bodies': sorted(touch_bodies), 'commands': action.parameters}
                     rows.append(state)
                     stage_rows.append(state)
                     if len(rows) % 2 == 0:
@@ -210,14 +229,20 @@ def main():
         write_json(args.output / 'trajectory.json', rows)
         write_json(args.output / 'trial.json', trial)
         z_values = [row['target'][2] for row in rows]
-        hold = [row['target'][2] for row in rows if row['stage'] == 'hold']
+        hold = [row for row in rows if row['stage'] == 'hold']
+        clear_of_table = all(any('hand' in body or 'wrist' in body for body in row['target_contact_bodies'])
+                             and not any('table' in body for body in row['target_contact_bodies'])
+                             for row in hold[-25:])
         print('initial', initial.tolist(), 'table edge/top', [edge, top], flush=True)
-        result = {'trial_id':trial['trial_id'], 'target_mass_kg':float(model.body_mass[target]),
+        result = {'trial_id':trial['trial_id'], 'approach':args.approach,
+                  'target_mass_kg':float(model.body_mass[target]),
                   'target_initial_height_m':float(z), 'max_lift_m':max(z_values, default=z)-z,
-                  'lift_and_hold_pass':len(hold) == 60 and min(hold[-25:]) - z >= .05,
-                  'steps':len(rows), 'task_success':bool(raw._success)}
+                  'lift_and_hold_pass':len(hold) == 60 and clear_of_table
+                  and min(row['target'][2] for row in hold[-25:]) - z >= .05,
+                  'steps':len(rows), 'task_success':bool(raw._success),
+                  'robot_stabilized':bool(raw.task.robot.stabilized)}
         write_json(args.output / 'result.json', result)
-        print(json.dumps(result, default=float), flush=True)
+        print(json.dumps(result, default=lambda value: value.item()), flush=True)
 
 
 if __name__ == '__main__':
