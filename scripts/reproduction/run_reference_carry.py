@@ -127,6 +127,16 @@ def held_above_table(rows, initial_height):
         for row in window)
 
 
+def placed_in_container(rows, container_name):
+    window = rows[-20:]
+    return len(window) == 20 and all(
+        row['stage'] in ('release', 'settle') and container_name in row['target_contact_bodies']
+        and not any(body.startswith(('left_', 'right_')) and ('hand' in body or 'wrist' in body)
+                    for body in row['target_contact_bodies'])
+        and np.linalg.norm(np.array(row['target'][:2]) - row['container'][:2]) < .10
+        for row in window)
+
+
 def yaw_rotation(qpos):
     w, x, y, z = qpos[3:7]
     return Rotation.from_euler('z', np.arctan2(2 * (w*z + x*y), 1 - 2 * (y*y + z*z))).as_matrix()
@@ -294,8 +304,9 @@ def main():
         heading = yaw_rotation(data.qpos)
         origins = ik.wrist_poses(data, joint_goal)
         joint_goal = joint_goal.copy()
-        for step in range(65):
-            progress = min(1., (step + 1) / 36.)
+        release_steps = 36
+        for step in range(trial['max_steps'] - len(rows)):
+            progress = min(1., (step + 1) / release_steps)
             smooth = progress**2 * (3. - 2. * progress)
             targets = []
             for side, sign, (p, r) in zip(SIDES, (1, -1), origins):
@@ -305,9 +316,9 @@ def main():
                 targets.append(goal.tolist())
                 indices, q = ik.solve(side, data, goal, r, joint_goal)
                 joint_goal[indices] += np.clip(q - joint_goal[indices], -.055, .055)
-            advance('release' if step < 36 else 'settle', joint_goal,
+            advance('release' if step < release_steps else 'settle', joint_goal,
                     [0., 0., 0., -np.pi], targets, video, carry_height)
-            if ended:
+            if ended or (step >= release_steps and placed_in_container(rows, container_name)):
                 return
 
     try:
@@ -378,13 +389,6 @@ def main():
         write_json(args.output / 'trial.json', trial)
         z_values = [row['target'][2] for row in rows]
         print('initial', initial.tolist(), 'table edge/top', [edge, top], flush=True)
-        final = rows[-20:]
-        placement_pass = len(final) == 20 and all(
-            row['stage'] in ('release', 'settle') and container_name in row['target_contact_bodies']
-            and not any(body.startswith(('left_', 'right_')) and ('hand' in body or 'wrist' in body)
-                        for body in row['target_contact_bodies'])
-            and np.linalg.norm(np.array(row['target'][:2]) - row['container'][:2]) < .10
-            for row in final)
         result = {'trial_id':trial['trial_id'], 'approach':'tracking-cradle',
                   'target_mass_kg':float(model.body_mass[target]),
                   'hand_torque_limits_nm':hand_limits[raw.task.robot.right_hand_index - 1].tolist(),
@@ -392,7 +396,8 @@ def main():
                   'lift_and_hold_pass':held_above_table(rows, z),
                   'carry_requested':args.carry, 'phases':list(dict.fromkeys(row['stage'] for row in rows)),
                   'steps':len(rows), 'task_success':official_success_step is not None,
-                  'first_official_success_step':official_success_step, 'placement_pass':bool(placement_pass),
+                  'first_official_success_step':official_success_step,
+                  'placement_pass':placed_in_container(rows, container_name),
                   'robot_stabilized':bool(raw.task.robot.stabilized)}
         write_json(args.output / 'result.json', result)
         print(json.dumps(result, default=lambda value: value.item()), flush=True)
