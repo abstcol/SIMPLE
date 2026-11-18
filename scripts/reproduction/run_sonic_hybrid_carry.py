@@ -33,6 +33,8 @@ WRIST_OFFSETS = ([.18, -.025, 0.], [.18, .025, 0.])
 
 def planner_packet(base, wrists, forward, facing):
     """Convert world-frame wrist-link targets to the native three-point input."""
+    if wrists is None:
+        return build_planner_message(IDLE, (0., 0., 0.), facing)
     to_local = Rotation.from_quat(base[3:7], scalar_first=True).inv()
     positions, orientations = [], []
     for (position, rotation), offset in zip(wrists, WRIST_OFFSETS):
@@ -132,6 +134,13 @@ def run(args, trial):
     facing = (1., 0., 0.)
     heartbeat_stop = threading.Event()
     heartbeat = threading.Thread(target=publish_state, daemon=True)
+    startup_support = 1.
+    band_action = ActionCmd('elastic_band')
+    robot.elastic_band.length = float(data.xpos[robot.band_attached_link, 2] - robot.elastic_band.point[2])
+
+    def warmup_crane():
+        robot.apply_action(band_action)
+        data.xfrc_applied[robot.band_attached_link] *= startup_support
 
     with zmq.Context() as context, context.socket(zmq.PUB) as pub, (
         args.output / 'controller.log'
@@ -155,12 +164,13 @@ def run(args, trial):
                 if controller.poll() is not None or time.monotonic() >= deadline:
                     raise RuntimeError('SONIC did not engage. See controller.log.')
                 pub.send(build_command_message(start=True, stop=False, planner=True))
-                pub.send(planner_packet(data.qpos[:7], nominal_wrists, 0., facing))
+                pub.send(planner_packet(data.qpos[:7], None, 0., facing))
                 time.sleep(.04)
 
             def tick(phase, goals, forward=0.):
                 nonlocal proprio, last_goals
-                last_goals = goals
+                if goals is not None:
+                    last_goals = goals
                 start = time.monotonic()
                 if controller.poll() is not None:
                     raise RuntimeError('SONIC exited. See controller.log.')
@@ -180,7 +190,7 @@ def run(args, trial):
                                  task_success=bool(terminated),
                                  contacts_n={key: force.tolist() for key, force in contacts.items()},
                                  wrists_xyz_m=[p.tolist() for p, _ in current_wrists()],
-                                 wrist_targets_m=[p.tolist() for p, _ in goals]))
+                                 wrist_targets_m=[p.tolist() for p, _ in (goals or [])]))
                 if len(rows) % 2 == 0:
                     frames.append(data.qpos.copy())
                 time.sleep(max(0., 1 / FPS - (time.monotonic() - start)))
@@ -202,9 +212,19 @@ def run(args, trial):
                 print(phase, rows[-1]['displacement_m'], list(rows[-1]['contacts_n']), flush=True)
                 return rows[-1]['standing']
 
-            # The frozen spawn is already within reach. Keep the lower body in
-            # planner IDLE throughout this standing probe.
-            move('settle', 75, nominal_wrists)
+            # Use the existing sim crane during SONIC's three-second motor ramp.
+            # Remove its wrench before standing manipulation.
+            raw.substep_callback = warmup_crane
+            warmup_crane()
+            for _ in range(185):
+                tick('startup', None)
+            last_goals = current_wrists()
+            for step in range(60):
+                startup_support = 1. - (step + 1) / 60
+                tick('release_crane', last_goals)
+            raw.substep_callback = None
+            data.xfrc_applied[robot.band_attached_link] = 0.
+            move('settle', 50, last_goals)
             if rows[-1]['standing'] and move('approach', 105, cradle(.145, .076)):
                 if move('cup', 105, cradle(.045, .046)):
                     move('preload', 65, cradle(.033, .046), follow_box=True)
@@ -237,6 +257,7 @@ def run(args, trial):
                         mujoco.mj_forward(model, data)
                         renderer.update_scene(data, camera=camera)
                         video.append_data(renderer.render())
+            raw.mujoco.renderers.clear()
             env.close()
     print(json.dumps(result), flush=True)
 
