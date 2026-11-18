@@ -140,7 +140,7 @@ def run(args, trial):
         heartbeat.start()
         try:
             nominal_wrists = last_goals = current_wrists()
-            deadline = time.monotonic() + 240
+            deadline = time.monotonic() + args.startup_timeout
             while max(bridge.low_cmd.motor_cmd[i].kp for i in range(29)) <= 5:
                 if controller.poll() is not None or time.monotonic() >= deadline:
                     raise RuntimeError('SONIC did not engage. See controller.log.')
@@ -246,6 +246,7 @@ def main():
     parser.add_argument('--mass', type=float, choices=[1., 10.], required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--port', type=int, default=5596)
+    parser.add_argument('--startup-timeout', type=float, default=600., help='Seconds allowed for cold engine startup.')
     parser.add_argument('--deploy', type=Path, default=Path('third_party/GR00T-WholeBodyControl/gear_sonic_deploy'))
     args = parser.parse_args()
     trials = validate_manifest(json.loads(args.manifest.read_text()))
