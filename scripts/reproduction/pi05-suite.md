@@ -123,27 +123,38 @@ unresolved, so these runs are not a claim of reproducing the paper's success rat
 
 ## SIMPLE-Phys: target mass switch
 
-Task definitions, scores and budgets stay unchanged. `--mass-scale` enables uniform
-scaling of the target's mass and inertia during scene construction, before the
-first physics step and stand warmup. COM, geometry, friction and other actors stay
-unchanged. Omit it to disable the perturbation; `1` is an enabled baseline check.
+Mass scaling changes the task target's mass and inertia at scene construction,
+before the first physics step and standing warmup. A missing `mass` entry uses
+nominal mass. A scale of `1` explicitly requests a nominal-mass control.
+
+For a quick run, use `--mass-scale 2`. To reuse the same settings across tasks or
+share them with another run, save this as `physics.json`:
+
+```json
+{"mass": {"scale": 2}}
+```
 
 ```bash
 python scripts/reproduction/prepare_pi05_suite.py \
   --data-root data/pi05-suite --output experiments/reproduction/phys/mass-2 \
-  --pilot --hand-profile pre_nov9 --mass-scale 2
+  --tasks G1WholebodyBendPickMP-v0 G1WholebodyTabletopGraspMP-v0 \
+  --pilot --hand-profile pre_nov9 --physics-config physics.json
 ```
 
-Launch these manifests normally, selecting `G1WholebodyBendPickMP-v0` and
-`G1WholebodyTabletopGraspMP-v0`. `--hand-profile` applies only to AMO; decoupled
-controllers keep their own settings. Use distinct output directories for disabled,
-1x and 2x runs, with the same scenes/seeds and runtime/physics profile.
+Launch the manifests as usual. The preparer copies the settings into each trial
+and the manifest-directory summary so execution can use the frozen values.
+`--hand-profile` applies to AMO. Use distinct directories for nominal and scaled
+runs, with the same scenes, seeds and runtime profiles.
 
-Each trial optionally accepts `"physics": {"enabled": true, "mass_scale": 2}`.
-For other callers, pass that dictionary as `gym.make(..., physics=...)`.
-Invalid scales (nonfinite, zero, negative or boolean) are rejected. The initial
-implementation supports rigid `ObjectActor` targets, including convex mesh
-assemblies and primitive boxes. Every reset rebuilds from nominal asset values.
+Python callers can use `gym.make(..., physics={"mass": {"scale": 2}})`. Mass
+supports rigid `ObjectActor` targets, including mesh assemblies and primitive
+boxes. Every reset rebuilds from nominal asset values. The scale must be finite
+and positive. The same parser validates manifest and environment inputs.
+Existing manifests with `enabled` and `mass_scale` remain readable.
+
+Each perturbation has its own top-level entry in the physics config. Currently
+`mass` is supported. Unknown settings, including future COM and friction entries,
+fail validation before preparation writes any output.
 
 Results record the requested switch/scale, effective scale and compiled target
 mass, local COM, principal inertia and inertial orientation. Existing object-force
@@ -172,11 +183,11 @@ python scripts/reproduction/launch_pi05_suite.py \
   --output experiments/reproduction/phys-gr00t/run-01 --isaac-session task --gpu 0
 ```
 
-`--mass-scale` retains the legacy single-scale trial IDs. `--mass-scales` is
-mutually exclusive with it and adds `_mass_<scale>` to each trial ID. Both emit
-the same `physics.enabled`/`physics.mass_scale` fields; omission disables physics
-perturbation. Invalid or duplicate scales/seeds and unknown tasks fail before
-creating outputs. The selected rigid object remains the task's `target` role.
+Choose one of `--physics-config`, `--mass-scale` or `--mass-scales` per preparation.
+The two mass flags preserve their manifest format. `--mass-scale` retains the
+single-scale trial IDs. `--mass-scales` adds `_mass_<scale>` to each trial ID.
+Invalid or duplicate scales and seeds, and unknown tasks, fail before output is
+created.
 
 Default preparation still creates 20 nominal trials per task. Use
 `--model-seeds 0` for ten per scale, or `--model-seeds 0 1` for twenty. Existing

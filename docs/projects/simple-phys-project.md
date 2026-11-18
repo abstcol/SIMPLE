@@ -19,9 +19,9 @@
 
 ## 已实现的质量开关
 
-通过可选的 `physics.enabled` 与 `physics.mass_scale`，在场景构建、首次物理步和站立预热之前缩放刚体 `target` 的质量与惯量。默认关闭；1 倍是显式开启但不改变参数的对照。几何、局部质心、摩擦及其他物体保持固定，每次重建恢复标称值，物理真值不送入 VLA。
+通过可选的 `physics={"mass": {"scale": 2}}`，在场景构建、首次物理步和站立预热之前缩放刚体 `target` 的质量与惯量。省略 `mass` 时使用标称值，1 倍可用作显式对照。每次重建从标称资产开始，几何、局部质心、摩擦及其他物体保持固定。物理参数记录在清单及结果中。
 
-实现入口为[参数定义](../../src/simple/dr/physics.py)、[MuJoCo 场景构建](../../src/simple/engines/mujoco.py)和现有[评测准备器](../../scripts/reproduction/prepare_pi05_suite.py)，不复制任务、不新增一套评测管线。调用方式与参数记录见[运行指南](../../scripts/reproduction/pi05-suite.md#simple-phys-target-mass-switch)。
+实现入口为[配置解析](../../src/simple/physics.py)、[MuJoCo 场景构建](../../src/simple/engines/mujoco.py)和现有[评测准备器](../../scripts/reproduction/prepare_pi05_suite.py)。每种扰动有独立配置项，质心和摩擦可沿用同一个入口。配置文件、质量扫描与旧清单兼容方式见[运行指南](../../scripts/reproduction/pi05-suite.md#simple-phys-target-mass-switch)。
 
 两个 AMO 任务已完成关闭、1 倍、2 倍各一条，共 6 条 Isaac 功能验收，均成功。关闭与 1 倍的物理参数和初始状态一致；不承诺完整轨迹逐位一致。这 6 条单场景验收不计入下表。
 

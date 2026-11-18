@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import run_pi05_suite as suite
+from simple.physics import PhysicsConfig
 
 
 def trial(index=0):
@@ -23,15 +24,25 @@ def trial(index=0):
 class SuiteTest(unittest.TestCase):
     def test_invalid_physics_is_rejected_before_launch(self):
         for physics in (False, {'enabled': 1}, {'mass_scale': True}, {'mass_scale': 0},
-                        {'mass_scale': float('nan')}, {'mass_scale': float('inf')}, {'role': 'target'}):
+                        {'mass_scale': float('nan')}, {'mass_scale': float('inf')}, {'role': 'target'},
+                        {'mass': 2}, {'mass': {}}, {'mass': {'scale': 0}},
+                        {'mass': {'scale': True}}, {'mass': {'scale': 10**400}},
+                        {'mass': {'scale': 2, 'extra': 1}}, {'mass': {'scale': 2}, 'enabled': False}):
             record = trial()
             record['physics'] = physics
             with self.subTest(physics=physics), self.assertRaisesRegex(ValueError, 'physics'):
                 suite.validate_manifest([record])
-        for physics in (None, {}, {'enabled': True, 'mass_scale': 20}):
+        for physics, enabled, scale in (
+                (None, False, 1), ({}, False, 1), ({'mass_scale': 20}, False, 1),
+                ({'enabled': False, 'mass_scale': 20}, False, 1),
+                ({'enabled': True, 'mass_scale': 20}, True, 20),
+                ({'mass': {'scale': 1}}, True, 1), ({'mass': {'scale': 20}}, True, 20)):
             record = trial()
             record['physics'] = physics
-            suite.validate_manifest([record])
+            with self.subTest(physics=physics):
+                suite.validate_manifest([record])
+                mass = PhysicsConfig.from_dict(physics).mass
+                self.assertEqual((mass.enabled, mass.effective_scale), (enabled, scale))
 
     def test_task_session_persists_error_accounting_before_kit_shutdown(self):
         with TemporaryDirectory() as temp:
