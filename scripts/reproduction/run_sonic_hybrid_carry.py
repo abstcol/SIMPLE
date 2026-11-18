@@ -95,8 +95,8 @@ def run(args, trial):
     edge = float(data.geom(table.id).xpos[0] - table.size[0])
     top = float(data.geom(table.id).xpos[2] + table.size[2])
     wrists = tuple(model.body(f'{side}_wrist_yaw_link').id for side in SIDES)
-    limits = robot.torque_limit[robot.right_hand_index - 1]
-    np.testing.assert_allclose(limits, [2.45, .7, .7, .7, .7, .7, .7])
+    limits = robot.torque_limit[np.stack((robot.left_hand_index, robot.right_hand_index)) - 1]
+    np.testing.assert_allclose(limits, [[2.45, .7, .7, .7, .7, .7, .7]] * 2)
 
     def current_wrists():
         return [(data.body(wrist).xpos.copy(),
@@ -140,7 +140,7 @@ def run(args, trial):
                                       env={**os.environ, 'SONIC_FORCE_UNITREE_DDS': '1'})
         heartbeat.start()
         try:
-            nominal_wrists = current_wrists()
+            nominal_wrists = last_goals = current_wrists()
             deadline = time.monotonic() + 240
             while max(bridge.low_cmd.motor_cmd[i].kp for i in range(29)) <= 5:
                 if controller.poll() is not None or time.monotonic() >= deadline:
@@ -150,7 +150,8 @@ def run(args, trial):
                 time.sleep(.04)
 
             def tick(phase, goals, forward=0.):
-                nonlocal proprio
+                nonlocal proprio, last_goals
+                last_goals = goals
                 start = time.monotonic()
                 if controller.poll() is not None:
                     raise RuntimeError('SONIC exited. See controller.log.')
@@ -174,14 +175,14 @@ def run(args, trial):
                 time.sleep(max(0., 1 / FPS - (time.monotonic() - start)))
 
             def move(phase, steps, goals, follow_box=False):
-                origins = current_wrists()
+                origins = last_goals
                 for step in range(steps):
                     ratio = (step + 1) / steps
                     fraction = ratio * ratio * (3 - 2 * ratio)
                     shift = np.zeros(3)
                     if follow_box:
                         shift[:2] = np.clip(data.body(target).xpos[:2] - initial[:2], -.04, .07)
-                    targets = [(p0 + fraction * (p1 - p0) + shift,
+                    targets = [(p0 + fraction * (p1 + shift - p0),
                                 Rotation.from_rotvec(fraction * (r1 * r0.inv()).as_rotvec()) * r0)
                                for (p0, r0), (p1, r1) in zip(origins, goals)]
                     tick(phase, targets)
@@ -202,7 +203,7 @@ def run(args, trial):
                 if not rows[-1]['standing'] or (step >= 120 and forward < .015):
                     break
             if rows[-1]['standing']:
-                move('settle', 60, current_wrists())
+                move('settle', 60, last_goals)
             if rows[-1]['standing'] and move('approach', 105, cradle(.145, .076)):
                 if move('cup', 105, cradle(.045, .046)):
                     move('preload', 65, cradle(.033, .046), follow_box=True)
