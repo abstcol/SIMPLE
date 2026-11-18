@@ -82,6 +82,14 @@ class WristIK:
         goal[policy_ids] = np.clip(goal[policy_ids] + np.clip(offset, -.17, .17),
                                    limits[:, 0] + .005, limits[:, 1] - .005)
 
+    def wrist_poses(self, state, joint_goal):
+        self.scratch.qpos[:] = state.qpos
+        for body, qpos_ids, _, _, policy_ids in self.arms.values():
+            self.scratch.qpos[qpos_ids] = joint_goal[policy_ids]
+        mujoco.mj_kinematics(self.model, self.scratch)
+        return [(self.scratch.body(arm[0]).xpos.copy(), self.scratch.body(arm[0]).xmat.reshape(3, 3).copy())
+                for arm in self.arms.values()]
+
 
 def wrist_goal(point, roll=0., pitch=0., yaw=0., reach=.14):
     """Position a point on the open hand along the wrist's local x-axis."""
@@ -109,11 +117,27 @@ def lateral_pressure(forces, side, sign):
                        if name.startswith(side + '_') and ('hand' in name or 'wrist' in name))
 
 
+def held_above_table(rows, initial_height):
+    window = [row for row in rows if row['stage'] == 'hold'][-25:]
+    return len(window) == 25 and all(
+        row['target'][2] >= initial_height + .05
+        and 'table' not in row['target_contact_bodies']
+        and all(any(body.startswith(side + '_') and ('hand' in body or 'wrist' in body)
+                    for body in row['target_contact_bodies']) for side in SIDES)
+        for row in window)
+
+
+def yaw_rotation(qpos):
+    w, x, y, z = qpos[3:7]
+    return Rotation.from_euler('z', np.arctan2(2 * (w*z + x*y), 1 - 2 * (y*y + z*z))).as_matrix()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--manifest', type=Path, required=True)
     parser.add_argument('--trial', required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--carry', action='store_true', help='Continue to the second table after passing the lift check.')
     parser.add_argument('--approach', choices=('table-edge', 'bimanual-cradle', 'deep-cradle',
                                                'loaded-cradle', 'force-cradle', 'side-cradle',
                                                'tip-and-scoop', 'tracking-cradle'), default='tracking-cradle')
@@ -247,6 +271,90 @@ def main():
     arm_kp = dict(zip(raw.task.robot.joint_names[:29], config['MOTOR_KP']))
     position_gains = {side: np.array([arm_kp[model.joint(i).name] for i in range(model.njnt)
                                      if model.jnt_qposadr[i] in ik.arms[side][1]]) for side in SIDES}
+
+    def advance(stage, joint_goal, navigation, wrist_targets, video):
+        nonlocal obs, loads, ended
+        now = time.monotonic()
+        policy.set_observation(agent._build_wbc_observation(raw.task.robot.prepare_obs()))
+        policy.set_goal({'target_upper_body_pose': joint_goal[upper], 'navigate_cmd': navigation,
+                         'base_height_command': np.array([.74]),
+                         'target_time': now + 1 / agent._control_frequency,
+                         'interpolation_garbage_collection_time': now - 2 / agent._control_frequency,
+                         'timestamp': now})
+        q = policy.get_action(time=now)['q']
+        action = ActionCmd('decoupled_wbc', target_q=robot_model.get_body_actuated_joints(q),
+                           left_hand_q=robot_model.get_hand_actuated_joints(q, side='left'),
+                           right_hand_q=robot_model.get_hand_actuated_joints(q, side='right'))
+        obs, reward, terminated, truncated, info = env.step(action)
+        loads = forces_on_target(model, data, target)
+        state = {'stage': stage, 'step': len(rows) + 1, 'target': info['target'].tolist(),
+                 'pelvis': data.qpos[:7].tolist(), 'reward': float(reward),
+                 'wrists': [data.body(ik.arms[s][0]).xpos.tolist() for s in SIDES],
+                 'wrist_targets': wrist_targets, 'navigate_cmd': list(navigation),
+                 'target_contact_bodies': sorted(loads), 'target_contact_forces_n': loads,
+                 'commands': action.parameters, 'lift_progress': lift_progress}
+        rows.append(state)
+        if len(rows) % 2 == 0:
+            if stage in ('carry', 'align', 'release'):
+                camera.lookat[:] = [data.qpos[0], data.qpos[1], .68]
+            renderer.update_scene(data, camera=camera)
+            video.append_data(renderer.render())
+        ended = terminated or truncated or data.qpos[2] < .45
+        time.sleep(max(0, dt - (time.monotonic() - now)))
+        return state
+
+    def carry_to_container(joint_goal, nominal_goal, video):
+        container = raw.mujoco.mj_objects['container'].id
+        box = data.body(target)
+        destination = data.body(container).xpos.copy()
+        held_offset = yaw_rotation(data.qpos).T @ (box.xpos - data.qpos[:3])
+        stand_at = destination[:2] + held_offset[:2] + [.025, 0.]
+        lost = 0
+        for _ in range(320):
+            heading = yaw_rotation(data.qpos)
+            backward = heading[0, 0] < -.65
+            world_velocity = np.clip(2.4 * (stand_at - data.qpos[:2]), [-.42, -.20], [.2, .20])
+            if not backward:
+                world_velocity[:] = [-.19, 0.] if data.qpos[0] > edge - .38 else [0., 0.]
+            if np.linalg.norm(data.qpos[:2] - stand_at) < .055 and heading[0, 0] < -.985:
+                break
+            local_velocity = heading[:2, :2].T @ world_velocity
+            advance('carry', joint_goal, [*local_velocity, 1., -np.pi], None, video)
+            lost = lost + 1 if not any('hand' in body or 'wrist' in body for body in loads) else 0
+            if ended or lost >= 10:
+                print('Carry stopped after contact loss or episode termination.', flush=True)
+                return
+        if np.linalg.norm(data.qpos[:2] - stand_at) >= .12:
+            print('The robot did not reach the placement stance.', flush=True)
+            return
+
+        heading = yaw_rotation(data.qpos)
+        origins = ik.wrist_poses(data, nominal_goal)
+        delta = destination - box.xpos
+        delta[2] = max(0., .91 - box.xpos[2])
+        delta[:2] = np.clip(delta[:2], -.12, .12)
+        for stage, steps in [('align', 65), ('release', 55)]:
+            if stage == 'release' and np.linalg.norm(box.xpos[:2] - destination[:2]) > .09:
+                print('Placement stopped because the box was not aligned with the container.', flush=True)
+                return
+            for step in range(steps):
+                progress = (step + 1) / steps
+                smooth = progress**2 * (3. - 2. * progress)
+                joint_goal = nominal_goal.copy()
+                targets = []
+                for side, sign, (p, r) in zip(SIDES, (1, -1), origins):
+                    release = heading @ [-.045, sign * .075, .01] * smooth if stage == 'release' else 0.
+                    target_pos = p + delta * (smooth if stage == 'align' else 1.) + release
+                    targets.append(target_pos.tolist())
+                    indices, q = ik.solve(side, data, target_pos, r, nominal_goal)
+                    nominal_goal[indices] += np.clip(q - nominal_goal[indices], -.055, .055)
+                    joint_goal[indices] = nominal_goal[indices]
+                    force_scale = 1. - smooth if stage == 'release' else 1.
+                    force = heading @ np.array([-8., -sign * 16., 4.]) * force_scale
+                    ik.press(side, data, joint_goal, force, position_gains[side])
+                advance(stage, joint_goal, [0., 0., 0., -np.pi], targets, video)
+                if ended:
+                    return
     try:
         with imageio.get_writer(args.output / 'overview.mp4', fps=25, codec='libx264') as video:
             for name, steps, goals in stages:
@@ -322,35 +430,10 @@ def main():
                     if scoop and name in ('lift', 'hold'):
                         ik.press('left', data, joint_goal, np.array([1., 0., 9.]), position_gains['left'])
                         ik.press('right', data, joint_goal, np.array([4., 0., 1.]), position_gains['right'])
-                    now = time.monotonic()
-                    policy.set_observation(agent._build_wbc_observation(raw.task.robot.prepare_obs()))
-                    policy.set_goal({'target_upper_body_pose': joint_goal[upper],
-                                     'navigate_cmd': np.array([vx, 0., 0., 0.]),
-                                     'base_height_command': np.array([.74]),
-                                     'target_time': now + 1 / agent._control_frequency,
-                                     'interpolation_garbage_collection_time': now - 2 / agent._control_frequency,
-                                     'timestamp': now})
-                    q = policy.get_action(time=now)['q']
-                    action = ActionCmd('decoupled_wbc', target_q=robot_model.get_body_actuated_joints(q),
-                                       left_hand_q=robot_model.get_hand_actuated_joints(q, side='left'),
-                                       right_hand_q=robot_model.get_hand_actuated_joints(q, side='right'))
-                    obs, reward, terminated, truncated, info = env.step(action)
-                    loads = forces_on_target(model, data, target)
-                    state = {'stage': name, 'step': len(rows) + 1, 'target': info['target'].tolist(),
-                             'pelvis': data.qpos[:7].tolist(), 'reward':float(reward),
-                             'wrists': [data.body(ik.arms[s][0]).xpos.tolist() for s in SIDES],
-                             'wrist_targets': commanded_wrists,
-                             'target_contact_bodies': sorted(loads), 'target_contact_forces_n': loads,
-                             'commands': action.parameters, 'lift_progress': lift_progress}
-                    rows.append(state)
+                    state = advance(name, joint_goal, [vx, 0., 0., 0.], commanded_wrists, video)
                     stage_rows.append(state)
-                    if len(rows) % 2 == 0:
-                        renderer.update_scene(data, camera=camera)
-                        video.append_data(renderer.render())
-                    if terminated or truncated or data.qpos[2] < .45:
-                        ended = True
+                    if ended:
                         break
-                    time.sleep(max(0, dt - (time.monotonic() - now)))
                 print(name, 'target', np.round(stage_rows[-1]['target'][:3], 3).tolist(),
                       'wrists', np.round(stage_rows[-1]['wrists'], 3).tolist(),
                       'contacts', {body: np.round(force, 1).tolist() for body, force in loads.items()}, flush=True)
@@ -369,23 +452,22 @@ def main():
                     break
                 if ended:
                     break
+            if args.carry and not ended and held_above_table(rows, z):
+                print('Lift passed. Starting transport and placement.', flush=True)
+                carry_to_container(joint_goal, full_goal.copy(), video)
     finally:
         renderer.close()
         env.close()
         write_json(args.output / 'trajectory.json', rows)
         write_json(args.output / 'trial.json', trial)
         z_values = [row['target'][2] for row in rows]
-        hold = [row for row in rows if row['stage'] == 'hold']
-        clear_of_table = all(any('hand' in body or 'wrist' in body for body in row['target_contact_bodies'])
-                             and not any('table' in body for body in row['target_contact_bodies'])
-                             for row in hold[-25:])
         print('initial', initial.tolist(), 'table edge/top', [edge, top], flush=True)
         result = {'trial_id':trial['trial_id'], 'approach':args.approach,
                   'target_mass_kg':float(model.body_mass[target]),
                   'hand_torque_limits_nm':hand_limits[raw.task.robot.right_hand_index - 1].tolist(),
                   'target_initial_height_m':float(z), 'max_lift_m':max(z_values, default=z)-z,
-                  'lift_and_hold_pass':len(hold) == 60 and clear_of_table
-                  and min(row['target'][2] for row in hold[-25:]) - z >= .05,
+                  'lift_and_hold_pass':held_above_table(rows, z),
+                  'carry_requested':args.carry, 'phases':list(dict.fromkeys(row['stage'] for row in rows)),
                   'steps':len(rows), 'task_success':bool(raw._success),
                   'robot_stabilized':bool(raw.task.robot.stabilized)}
         write_json(args.output / 'result.json', result)
