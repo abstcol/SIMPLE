@@ -41,6 +41,7 @@ from simple.evals.tui import (
     restore_cursor,
     update_progress,
 )
+from simple.physics import PhysicsConfig
 from simple.utils import snake_to_pascal
 
 
@@ -210,6 +211,7 @@ def _run_eval_worker(
     worker_result_path: str | None = None,
     progress_reporter: Callable[[dict[str, Any]], None] | None = None,
     episode_cursor: Any | None = None,
+    physics: dict | None = None,
 ):
     def persist_payload(kind: str, payload: Any):
         if not worker_result_path:
@@ -326,6 +328,8 @@ def _run_eval_worker(
         headless=headless,
         sonic_config=sonic_config,
     )
+    if physics is not None:
+        make_kwargs["physics"] = physics
     raw_env = gym.make(env_id, **make_kwargs)
     sonic_env = raw_env.unwrapped  # type: ignore
     if isaac_render not in ("always", "on-query"):
@@ -545,6 +549,7 @@ def run_eval(
         raise ValueError(f"num_workers must be > 0, got {config.num_workers}")
     if agent_factory is not None and config.num_workers != 1:
         raise ValueError("custom agent_factory is only supported with num_workers=1")
+    PhysicsConfig.from_dict(config.physics)
 
     if sonic_config is None:
         sonic_config = _make_sonic_config()
@@ -613,6 +618,7 @@ def run_eval(
         trailing_episode_steps=config.trailing_episode_steps,
         isaac_render=config.isaac_render,
         sonic_config=sonic_config,
+        physics=config.physics,
     )
 
     console.print(f"Writing eval logs to [bold]{log_path}[/bold]")
@@ -841,7 +847,17 @@ def main(
     video_dir: Annotated[str, typer.Option(help="eval videos go to <video-dir>/<policy>/<task>/<dr>")] = "data/evals",
     trailing_episode_steps: Annotated[int, typer.Option(help="control steps (50 Hz) to keep running and recording after an episode terminates (not after a truncation)")] = 50,
     isaac_render: Annotated[str, typer.Option(help="always: Isaac renders every step; on-query: only steps whose images the agent reads (agent.needs_render_next), MuJoCo images fill the rest of the video")] = "always",
+    physics_config: Annotated[Path | None, typer.Option(help="JSON file with per-episode physics settings")] = None,
 ):
+    physics = None
+    if physics_config is not None:
+        try:
+            physics = json.loads(physics_config.read_text())
+            if not isinstance(physics, dict):
+                raise ValueError("Expected a JSON object")
+            PhysicsConfig.from_dict(physics)
+        except (OSError, ValueError) as error:
+            raise typer.BadParameter(str(error), param_hint="--physics-config") from error
     run_eval(
         EvalConfig(
             env_id=env_id,
@@ -864,6 +880,7 @@ def main(
             video_dir=video_dir,
             trailing_episode_steps=trailing_episode_steps,
             isaac_render=isaac_render,
+            physics=physics,
         ),
         show_progress=True if not os.environ.get("DEBUG", 0) else False,
     )

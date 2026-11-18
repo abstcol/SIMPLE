@@ -23,6 +23,8 @@
 
 实现入口为[配置解析](../../src/simple/physics.py)、[MuJoCo 场景构建](../../src/simple/engines/mujoco.py)和现有[评测准备器](../../scripts/reproduction/prepare_pi05_suite.py)。每种扰动有独立配置项，质心和摩擦可沿用同一个入口。配置文件、质量扫描与旧清单兼容方式见[运行指南](../../scripts/reproduction/pi05-suite.md#simple-phys-target-mass-switch)。
 
+推办公椅用 `physics={"mass": {"scale": 5, "actor": "articulated"}}` 缩放椅子各刚体的质量和惯量，沿用原有 Psi0、GR00T 和任务判定。可从 [Decoupled WBC 评测入口](../source/decoupled-wbc/evaluation.md#simple-phys) 加载配置。
+
 两个 AMO 任务已完成关闭、1 倍、2 倍各一条，共 6 条 Isaac 功能验收，均成功。关闭与 1 倍的物理参数和初始状态一致；不承诺完整轨迹逐位一致。这 6 条单场景验收不计入下表。
 
 ## 已验证结果

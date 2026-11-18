@@ -9,14 +9,17 @@ import math
 
 @dataclass(frozen=True)
 class MassPerturbation:
-    """Scale target mass and inertia at construction, preserving its mass distribution."""
+    """Scale one actor's mass and inertia at construction."""
 
     enabled: bool = False
     mass_scale: float = 1.0
+    actor: str = 'target'
 
     def __post_init__(self):
         if type(self.enabled) is not bool:
             raise ValueError('physics.enabled must be a boolean')
+        if self.actor not in ('target', 'articulated'):
+            raise ValueError('physics.mass.actor must be target or articulated')
         scale = self.mass_scale
         try:
             valid = type(scale) in (int, float) and math.isfinite(scale) and scale > 0
@@ -53,6 +56,7 @@ class PhysicsConfig:
         if 'enabled' in config or 'mass_scale' in config:
             raise ValueError('physics.mass cannot be combined with legacy enabled or mass_scale')
         mass = config['mass']
-        if not isinstance(mass, dict) or mass.keys() != {'scale'}:
-            raise ValueError('physics.mass requires exactly one field, scale')
-        return cls(mass=MassPerturbation(enabled=True, mass_scale=mass['scale']))
+        if not isinstance(mass, dict) or 'scale' not in mass or mass.keys() - {'scale', 'actor'}:
+            raise ValueError('physics.mass requires scale and accepts an optional actor')
+        return cls(mass=MassPerturbation(enabled=True, mass_scale=mass['scale'],
+                                         actor=mass.get('actor', 'target')))

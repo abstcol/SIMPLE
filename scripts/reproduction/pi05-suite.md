@@ -146,11 +146,17 @@ and the manifest-directory summary so execution can use the frozen values.
 `--hand-profile` applies to AMO. Use distinct directories for nominal and scaled
 runs, with the same scenes, seeds and runtime profiles.
 
-Python callers can use `gym.make(..., physics={"mass": {"scale": 2}})`. Mass
-supports rigid `ObjectActor` targets, including mesh assemblies and primitive
-boxes. Every reset rebuilds from nominal asset values. The scale must be finite
-and positive. The same parser validates manifest and environment inputs.
-Existing manifests with `enabled` and `mass_scale` remain readable.
+Python callers can use `gym.make(..., physics={"mass": {"scale": 2}})`. The
+default actor is the task's rigid `target`, including mesh assemblies and primitive
+boxes. For a floating articulated object, such as the chair in PushOfficeChair,
+use `{"mass": {"scale": 5, "actor": "articulated"}}`. The scale applies to the
+mass and inertia of every link in that actor. The [decoupled WBC evaluation
+guide](../../docs/source/decoupled-wbc/evaluation.md#simple-phys) shows how to
+use the same config with Psi0.
+
+Every reset rebuilds from nominal asset values. The scale must be finite and
+positive. The same parser validates manifest and environment inputs. Existing
+manifests with `enabled` and `mass_scale` remain readable.
 
 Each perturbation has its own top-level entry in the physics config. Currently
 `mass` is supported. Unknown settings, including future COM and friction entries,
