@@ -187,6 +187,8 @@ def main():
         body_actuated_joint_values=raw.task.robot.prepare_obs()['body_q'],
         left_hand_actuated_joint_values=np.zeros(7), right_hand_actuated_joint_values=np.zeros(7))
     target = raw.mujoco.mj_objects['target'].id
+    container = raw.mujoco.mj_objects['container'].id
+    container_name = model.body(container).name
     table = model.geom('table_geom')
     edge = float(data.geom(table.id).xpos[0] - table.size[0])
     top = float(data.geom(table.id).xpos[2] + table.size[2])
@@ -258,6 +260,7 @@ def main():
     camera.lookat[:] = [edge - .08, y, .66]
     rows = []
     ended = False
+    official_success_step = None
     previous_goals = None
     squeeze = np.zeros(2)
     lift_progress = 0
@@ -273,7 +276,7 @@ def main():
                                      if model.jnt_qposadr[i] in ik.arms[side][1]]) for side in SIDES}
 
     def advance(stage, joint_goal, navigation, wrist_targets, video):
-        nonlocal obs, loads, ended
+        nonlocal obs, loads, ended, official_success_step
         now = time.monotonic()
         policy.set_observation(agent._build_wbc_observation(raw.task.robot.prepare_obs()))
         policy.set_goal({'target_upper_body_pose': joint_goal[upper], 'navigate_cmd': navigation,
@@ -288,6 +291,7 @@ def main():
         obs, reward, terminated, truncated, info = env.step(action)
         loads = forces_on_target(model, data, target)
         state = {'stage': stage, 'step': len(rows) + 1, 'target': info['target'].tolist(),
+                 'container': info['container'].tolist(), 'official_success': bool(terminated),
                  'pelvis': data.qpos[:7].tolist(), 'reward': float(reward),
                  'wrists': [data.body(ik.arms[s][0]).xpos.tolist() for s in SIDES],
                  'wrist_targets': wrist_targets, 'navigate_cmd': list(navigation),
@@ -295,16 +299,19 @@ def main():
                  'commands': action.parameters, 'lift_progress': lift_progress}
         rows.append(state)
         if len(rows) % 2 == 0:
-            if stage in ('carry', 'align', 'release'):
+            if stage in ('carry', 'raise_at_destination', 'align', 'release', 'settle'):
                 camera.lookat[:] = [data.qpos[0], data.qpos[1], .68]
             renderer.update_scene(data, camera=camera)
             video.append_data(renderer.render())
-        ended = terminated or truncated or data.qpos[2] < .45
+        if terminated and official_success_step is None:
+            official_success_step = len(rows)
+        # Continue a diagnostic placement if the score fires on basket contact.
+        # Preserve the first official success and honor the original TimeLimit.
+        ended = (terminated and not args.carry) or truncated or data.qpos[2] < .45
         time.sleep(max(0, dt - (time.monotonic() - now)))
         return state
 
     def carry_to_container(joint_goal, nominal_goal, video):
-        container = raw.mujoco.mj_objects['container'].id
         box = data.body(target)
         destination = data.body(container).xpos.copy()
         held_offset = yaw_rotation(data.qpos).T @ (box.xpos - data.qpos[:3])
@@ -324,6 +331,8 @@ def main():
             if ended or lost >= 10:
                 print('Carry stopped after contact loss or episode termination.', flush=True)
                 return
+            if official_success_step is not None:
+                break
         if np.linalg.norm(data.qpos[:2] - stand_at) >= .12:
             print('The robot did not reach the placement stance.', flush=True)
             return
@@ -331,9 +340,11 @@ def main():
         heading = yaw_rotation(data.qpos)
         origins = ik.wrist_poses(data, nominal_goal)
         delta = destination - box.xpos
-        delta[2] = max(0., .91 - box.xpos[2])
+        delta[2] = 0.
         delta[:2] = np.clip(delta[:2], -.12, .12)
-        for stage, steps in [('align', 65), ('release', 55)]:
+        raise_box = np.array([0., 0., max(.04, .99 - box.xpos[2])])
+        for stage, steps in [('raise_at_destination', 35), ('align', 55), ('release', 55), ('settle', 25)]:
+            destination = data.body(container).xpos.copy()
             if stage == 'release' and np.linalg.norm(box.xpos[:2] - destination[:2]) > .09:
                 print('Placement stopped because the box was not aligned with the container.', flush=True)
                 return
@@ -343,13 +354,17 @@ def main():
                 joint_goal = nominal_goal.copy()
                 targets = []
                 for side, sign, (p, r) in zip(SIDES, (1, -1), origins):
-                    release = heading @ [-.045, sign * .075, .01] * smooth if stage == 'release' else 0.
-                    target_pos = p + delta * (smooth if stage == 'align' else 1.) + release
+                    opening = smooth if stage == 'release' else float(stage == 'settle')
+                    retreat = heading @ [-.045, sign * .075, .01] * opening
+                    translation = raise_box * (smooth if stage == 'raise_at_destination' else 1.)
+                    if stage != 'raise_at_destination':
+                        translation += delta * (smooth if stage == 'align' else 1.)
+                    target_pos = p + translation + retreat
                     targets.append(target_pos.tolist())
                     indices, q = ik.solve(side, data, target_pos, r, nominal_goal)
                     nominal_goal[indices] += np.clip(q - nominal_goal[indices], -.055, .055)
                     joint_goal[indices] = nominal_goal[indices]
-                    force_scale = 1. - smooth if stage == 'release' else 1.
+                    force_scale = 1. - opening
                     force = heading @ np.array([-8., -sign * 16., 4.]) * force_scale
                     ik.press(side, data, joint_goal, force, position_gains[side])
                 advance(stage, joint_goal, [0., 0., 0., -np.pi], targets, video)
@@ -462,13 +477,21 @@ def main():
         write_json(args.output / 'trial.json', trial)
         z_values = [row['target'][2] for row in rows]
         print('initial', initial.tolist(), 'table edge/top', [edge, top], flush=True)
+        final = rows[-20:]
+        placement_pass = len(final) == 20 and all(
+            row['stage'] in ('release', 'settle') and container_name in row['target_contact_bodies']
+            and not any(body.startswith(('left_', 'right_')) and ('hand' in body or 'wrist' in body)
+                        for body in row['target_contact_bodies'])
+            and np.linalg.norm(np.array(row['target'][:2]) - row['container'][:2]) < .10
+            for row in final)
         result = {'trial_id':trial['trial_id'], 'approach':args.approach,
                   'target_mass_kg':float(model.body_mass[target]),
                   'hand_torque_limits_nm':hand_limits[raw.task.robot.right_hand_index - 1].tolist(),
                   'target_initial_height_m':float(z), 'max_lift_m':max(z_values, default=z)-z,
                   'lift_and_hold_pass':held_above_table(rows, z),
                   'carry_requested':args.carry, 'phases':list(dict.fromkeys(row['stage'] for row in rows)),
-                  'steps':len(rows), 'task_success':bool(raw._success),
+                  'steps':len(rows), 'task_success':official_success_step is not None,
+                  'first_official_success_step':official_success_step, 'placement_pass':bool(placement_pass),
                   'robot_stabilized':bool(raw.task.robot.stabilized)}
         write_json(args.output / 'result.json', result)
         print(json.dumps(result, default=lambda value: value.item()), flush=True)
