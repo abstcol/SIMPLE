@@ -79,15 +79,25 @@ def run(args, trial):
     config.update(ENV_NAME='simple', USE_JOYSTICK=False)
     physics = {'mass': {'scale': args.mass, 'actor': 'target'}}
     env = gym.make(TASK, sim_mode='mujoco', headless=True, webrtc=False,
-                   render_hz=FPS, physics_dt=config['SIMULATE_DT'],
+                   render_hz=FPS, physics_dt=config['SIMULATE_DT'], disable_env_checker=True,
                    sonic_config=config, physics=physics)
     raw = env.unwrapped
     raw.mujoco.upstream_object_gravity = True
     env.reset(seed=trial['sim_seed'],
               options={'state_dict': decode_environment_config(trial['environment_config'])})
+    # The expert reads physics state and renders the third-person video after the rollout.
+    # Skip the two unused wrist/head image readbacks in the real-time loop.
+    camera_names = tuple(raw.mujoco.renderers)
+    raw.mujoco.close()
+    raw.mujoco.renderers = dict.fromkeys(camera_names)
     model, data, robot = raw.mjModel, raw.mjData, raw.task.robot
     bridge = UnitreeSdk2Bridge(config)
-    proprio = robot.prepare_obs()
+
+    def robot_state():
+        return {name: value.copy() if isinstance(value, np.ndarray) else value
+                for name, value in robot.prepare_obs().items()}
+
+    proprio = robot_state()
     target = raw.mujoco.mj_objects['target'].id
     initial = data.body(target).xpos.copy()
     table = model.geom('table_geom')
@@ -158,12 +168,14 @@ def run(args, trial):
                 action = ActionCmd('wbc_torque', low_cmd=bridge.low_cmd, use_sensor=bridge.use_sensor,
                                    left_hand_cmd=bridge.left_hand_cmd, right_hand_cmd=bridge.right_hand_cmd)
                 _, _, terminated, _, _ = env.step(action)
-                proprio = robot.prepare_obs()
+                proprio = robot_state()
                 pos = data.body(target).xpos.copy()
                 contacts = forces_on_target(model, data, target)
                 rows.append(dict(phase=phase, t_s=float(data.time), object_xyz_m=pos.tolist(),
                                  displacement_m=(pos - initial).tolist(),
-                                 pelvis_xy_m=data.qpos[:2].tolist(),
+                                 pelvis_xyz_m=data.qpos[:3].tolist(),
+                                 pelvis_quat_wxyz=data.qpos[3:7].tolist(),
+                                 navigation_speed_mps=forward,
                                  standing=bool(data.qpos[2] > .54),
                                  task_success=bool(terminated),
                                  contacts_n={key: force.tolist() for key, force in contacts.items()},
@@ -190,19 +202,9 @@ def run(args, trial):
                 print(phase, rows[-1]['displacement_m'], list(rows[-1]['contacts_n']), flush=True)
                 return rows[-1]['standing']
 
-            for step in range(240):
-                forward = float(np.clip(2.0 * (edge - .27 - data.qpos[0]), 0., .18))
-                if step < 50:
-                    forward = 0.
-                base = Rotation.from_quat(data.qpos[3:7], scalar_first=True)
-                # Tuck hands above the table during the walk to the common staging pose.
-                tuck = [(data.qpos[:3] + base.apply([.21, sign * .23, .10]), base)
-                        for sign in (1, -1)]
-                tick('stage', tuck, forward)
-                if not rows[-1]['standing'] or (step >= 120 and forward < .015):
-                    break
-            if rows[-1]['standing']:
-                move('settle', 60, last_goals)
+            # The frozen spawn is already within reach. Keep the lower body in
+            # planner IDLE throughout this standing probe.
+            move('settle', 75, nominal_wrists)
             if rows[-1]['standing'] and move('approach', 105, cradle(.145, .076)):
                 if move('cup', 105, cradle(.045, .046)):
                     move('preload', 65, cradle(.033, .046), follow_box=True)
