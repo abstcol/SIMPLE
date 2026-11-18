@@ -141,6 +141,16 @@ def run(args, trial):
         robot.apply_action(band_action)
         data.xfrc_applied[robot.band_attached_link] *= startup_support
 
+    def pace_substep():
+        nonlocal proprio, next_substep
+        proprio = robot_state()
+        if startup_support:
+            warmup_crane()
+        next_substep += raw.mujoco.physics_dt
+        time.sleep(max(0., next_substep - time.monotonic()))
+
+    next_substep = 0.
+
     with zmq.Context() as context, context.socket(zmq.PUB) as pub, (
         args.output / 'controller.log'
     ).open('w') as log:
@@ -181,20 +191,20 @@ def run(args, trial):
             last_goals = current_wrists()
             for _ in range(5):
                 pub.send(build_command_message(start=True, stop=False, planner=True))
+                pub.send(planner_packet(data.qpos[:7], None, 0., facing))
                 time.sleep(.02)
 
             def tick(phase, goals, forward=0.):
-                nonlocal proprio, last_goals
+                nonlocal next_substep, last_goals
                 if goals is not None:
                     last_goals = goals
-                start = time.monotonic()
+                next_substep = time.monotonic()
                 if controller.poll() is not None:
                     raise RuntimeError('SONIC exited. See controller.log.')
                 pub.send(planner_packet(data.qpos[:7], goals, forward, facing))
                 action = ActionCmd('wbc_torque', low_cmd=bridge.low_cmd, use_sensor=bridge.use_sensor,
                                    left_hand_cmd=bridge.left_hand_cmd, right_hand_cmd=bridge.right_hand_cmd)
                 _, _, terminated, _, _ = env.step(action)
-                proprio = robot_state()
                 pos = data.body(target).xpos.copy()
                 contacts = forces_on_target(model, data, target)
                 rows.append(dict(phase=phase, t_s=float(data.time), object_xyz_m=pos.tolist(),
@@ -209,7 +219,6 @@ def run(args, trial):
                                  wrist_targets_m=[p.tolist() for p, _ in (goals or [])]))
                 if len(rows) % 2 == 0:
                     frames.append(data.qpos.copy())
-                time.sleep(max(0., 1 / FPS - (time.monotonic() - start)))
 
             def move(phase, steps, goals, follow_box=False):
                 origins = last_goals
@@ -230,14 +239,13 @@ def run(args, trial):
 
             # Use the existing sim crane during SONIC's first control steps.
             # Remove its wrench before standing manipulation.
-            raw.substep_callback = warmup_crane
+            raw.substep_callback = pace_substep
             warmup_crane()
             for _ in range(45):
                 tick('startup', None)
             for step in range(75):
                 startup_support = 1. - (step + 1) / 75
                 tick('release_crane', None)
-            raw.substep_callback = None
             data.xfrc_applied[robot.band_attached_link] = 0.
             for _ in range(50):
                 tick('settle', None)
