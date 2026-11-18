@@ -84,7 +84,7 @@ def main():
     parser.add_argument('--manifest', type=Path, required=True)
     parser.add_argument('--trial', required=True)
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--approach', choices=('table-edge', 'bimanual-cradle'), default='table-edge')
+    parser.add_argument('--approach', choices=('table-edge', 'bimanual-cradle', 'deep-cradle'), default='table-edge')
     args = parser.parse_args()
     records = validate_manifest(json.loads(args.manifest.read_text()))
     trial = next((row for row in records if row['trial_id'] == args.trial), None)
@@ -151,18 +151,23 @@ def main():
         ('lift', 100, (left_lift, right_support)),
         ('hold', 60, (left_lift, right_support)),
     ]
-    if args.approach == 'bimanual-cradle':
+    if args.approach in ('bimanual-cradle', 'deep-cradle'):
         # Angle both palms upward and approach the lower corners from the sides.
         # The fingers are open. The arms move the palms inward and then upward.
+        deep = args.approach == 'deep-cradle'
+
         def cradle(clearance, height, forward=0.):
             return tuple(wrist_goal([x + forward, y + sign * clearance, top + height],
-                                    roll=-sign * 45, yaw=-sign * 22, reach=.13)
+                                    roll=-sign * 45, yaw=-sign * (12 if deep else 22),
+                                    reach=.075 if deep else .13)
                          for sign in (1, -1))
 
         stages = [('approach', 100, cradle(.155, .07)),
                   ('cup_lower_corners', 105, cradle(.058, .05)),
                   ('lift', 100, cradle(.051, .18, -.01)),
                   ('hold', 60, cradle(.051, .18, -.01))]
+        if deep:
+            stages.insert(0, ('step_closer', 125, None))
     model.vis.global_.offwidth = max(640, model.vis.global_.offwidth)
     model.vis.global_.offheight = max(480, model.vis.global_.offheight)
     renderer = mujoco.Renderer(model, height=480, width=640)
@@ -181,16 +186,18 @@ def main():
                 for step in range(steps):
                     fraction = min(1., (step + 1) / (steps * .80))
                     fraction = fraction**2 * (3 - 2 * fraction)
-                    for side, (p0, r0), (p1, r1) in zip(SIDES, origins, goals):
-                        axis = Rotation.from_matrix(r1 @ r0.T).as_rotvec()
-                        ids, values = ik.solve(side, data, p0 + fraction * (p1 - p0),
-                                               Rotation.from_rotvec(fraction * axis).as_matrix() @ r0,
-                                               full_goal)
-                        full_goal[ids] += np.clip(values - full_goal[ids], -.055, .055)
+                    if goals is not None:
+                        for side, (p0, r0), (p1, r1) in zip(SIDES, origins, goals):
+                            axis = Rotation.from_matrix(r1 @ r0.T).as_rotvec()
+                            ids, values = ik.solve(side, data, p0 + fraction * (p1 - p0),
+                                                   Rotation.from_rotvec(fraction * axis).as_matrix() @ r0,
+                                                   full_goal)
+                            full_goal[ids] += np.clip(values - full_goal[ids], -.055, .055)
+                    vx = .15 if name == 'step_closer' and data.qpos[0] < edge - .22 else 0.
                     now = time.monotonic()
                     policy.set_observation(agent._build_wbc_observation(raw.task.robot.prepare_obs()))
                     policy.set_goal({'target_upper_body_pose': full_goal[upper].copy(),
-                                     'navigate_cmd': np.array([0., 0., 0., 0.]),
+                                     'navigate_cmd': np.array([vx, 0., 0., 0.]),
                                      'base_height_command': np.array([.74]),
                                      'target_time': now + 1 / agent._control_frequency,
                                      'interpolation_garbage_collection_time': now - 2 / agent._control_frequency,
@@ -208,7 +215,7 @@ def main():
                     state = {'stage': name, 'step': len(rows) + 1, 'target': info['target'].tolist(),
                              'pelvis': data.qpos[:7].tolist(), 'reward':float(reward),
                              'wrists': [data.body(ik.arms[s][0]).xpos.tolist() for s in SIDES],
-                             'wrist_targets': [p.tolist() for p, _ in goals],
+                             'wrist_targets': [p.tolist() for p, _ in goals] if goals is not None else None,
                              'target_contact_bodies': sorted(touch_bodies), 'commands': action.parameters}
                     rows.append(state)
                     stage_rows.append(state)
