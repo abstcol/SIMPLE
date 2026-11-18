@@ -29,7 +29,7 @@ from PIL import Image
 import os
 import cv2
 import transforms3d as t3d
-from simple.dr.physics import MassPerturbation
+from simple.physics import PhysicsConfig
 
 xyzw_to_wxyz = lambda q: np.array([q[3], q[0], q[1], q[2]])
 
@@ -38,7 +38,7 @@ class MujocoSimulator(Simulator):
     def __init__(self, task:Task, render_hz:int=30, physics_dt: float = 0.002, headless=True,
                  physics: dict | None = None) -> None:
         self.task = task
-        self.mass_perturbation = MassPerturbation(**({} if physics is None else physics))
+        self.mass_perturbation = PhysicsConfig.from_dict(physics).mass
         self.render_hz = task.metadata["render_hz"] if "render_hz" in self.task.metadata else render_hz
         self.physics_dt = task.metadata["physics_dt"] if "physics_dt" in self.task.metadata else physics_dt
 

@@ -48,11 +48,12 @@ def test_build_and_repeated_reset_preserve_everything_except_target_mass_and_ine
         layout.actors['distractor'].asset.label = 'other'
     layout.add_primitive('table', Box([1, 1, .1], [0, 0, -.05], [1, 0, 0, 0]))
     task = SimpleNamespace(layout=layout, metadata={'need_gravity': True}, robot=NoControl())
-    sim = MujocoSimulator(task)
+    sim = MujocoSimulator(task, physics={'mass': {'scale': 2}})
     sim.upstream_object_gravity = True
 
-    def build(config):
-        sim.mass_perturbation = config
+    def build(config=None):
+        if config is not None:
+            sim.mass_perturbation = config
         sim.update_layout(sonic_config={})  # No robot assets, renderer or GPU needed.
         m, d = sim.mjModel, sim.mjData
         ids = [sim.mj_objects[k].id for k in ('target', 'distractor')]
@@ -63,6 +64,7 @@ def test_build_and_repeated_reset_preserve_everything_except_target_mass_and_ine
         np.testing.assert_array_equal(force, [0, 0, -.9810000000000001, 0, 0, 0])
         return values, ids
 
+    configured, _ = build()
     baseline, ids = build(MassPerturbation())
     assert baseline['body_mass'][ids[0]] == pytest.approx(.1)
     for config in (MassPerturbation(False, 2), MassPerturbation(True, 1),
@@ -72,6 +74,8 @@ def test_build_and_repeated_reset_preserve_everything_except_target_mass_and_ine
         assert current_ids == ids
         factor = config.effective_scale
         for field, original in baseline.items():
+            if factor == 2:
+                np.testing.assert_array_equal(configured[field], current[field])
             expected = original.copy()
             if field in ('body_mass', 'body_inertia'):
                 expected[ids[0]] *= factor

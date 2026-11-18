@@ -3,7 +3,13 @@ from copy import deepcopy
 import hashlib
 import json
 import math
+from pathlib import Path
 import re
+import sys
+
+# Use the same config as the simulator when running these scripts from a checkout.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src'))
+from simple.physics import PhysicsConfig  # noqa: E402
 
 
 def select_tasks(items, names=None):
@@ -45,13 +51,10 @@ def validate_manifest(records):
         if 'hand_profile' in trial and (trial['hand_profile'] not in ('current', 'pre_nov9')
                                         or trial['controller'] != 'amo'):
             raise ValueError(f'{name}: hand_profile requires current/pre_nov9 and AMO')
-        physics = trial.get('physics')
-        if physics is not None:
-            if not isinstance(physics, dict) or set(physics) - {'enabled', 'mass_scale'}:
-                raise ValueError(f'{name}: physics accepts only enabled and mass_scale')
-            enabled, scale = physics.get('enabled', False), physics.get('mass_scale', 1.0)
-            if type(enabled) is not bool or type(scale) not in (int, float) or not math.isfinite(scale) or scale <= 0:
-                raise ValueError(f'{name}: physics requires a boolean enabled and finite positive mass_scale')
+        try:
+            PhysicsConfig.from_dict(trial.get('physics'))
+        except ValueError as error:
+            raise ValueError(f'{name}: {error}') from error
         if not isinstance(trial['env_id'], str) or not trial['env_id'].startswith('simple/'):
             raise ValueError(f'{name}: expected a registered simple/ environment')
         threshold = trial['success_criteria']

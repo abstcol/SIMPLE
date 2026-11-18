@@ -84,17 +84,34 @@ class PrepareTest(unittest.TestCase):
         self.assertFalse(records[0]['counts_toward_main'])
         self.assertEqual(records[0]['physics'], {'enabled': True, 'mass_scale': 2})
 
+    def test_physics_file_is_frozen_in_manifest(self):
+        config = {'mass': {'scale': 2}}
+        config_path = self.root / 'physics.json'
+        config_path.write_text(json.dumps(config))
+        out = self.invoke('--physics-config', str(config_path), '--model-seeds', '0')
+        config_path.unlink()
+        records = json.loads((out / (self.name + '.json')).read_text())
+        self.assertEqual(len(records), 10)
+        self.assertEqual(records[0]['trial_id'], 'episode_000_seed_0')
+        self.assertTrue(all(r['physics'] == config for r in records))
+        self.assertEqual(json.loads((out / 'summary.json').read_text())['physics'], config)
+        validate_manifest(records)
+
     def test_close_scales_get_distinct_round_trip_labels(self):
         out = self.invoke('--pilot', '--model-seeds', '0', '--mass-scales', '1', '1.0000000001')
         records = json.loads((out / (self.name + '.json')).read_text())
         self.assertEqual(len({r['trial_id'] for r in records}), 2)
 
     def test_invalid_requests_do_not_create_output(self):
+        invalid_config = self.root / 'physics.json'
+        invalid_config.write_text(json.dumps({'friction': {}}))
         for i, options in enumerate([
             ['--mass-scales', '0'], ['--mass-scales', 'nan'], ['--mass-scales', 'inf'],
             ['--mass-scales', '1', '1.0'], ['--mass-scale', '2', '--mass-scales', '2'],
             ['--model-seeds', '0', '0'], ['--model-seeds', '-1'], ['--model-seeds', str(2**63)],
             ['--tasks', 'unknown'], ['--tasks', self.name, self.name],
+            ['--physics-config', str(invalid_config)],
+            ['--physics-config', str(invalid_config), '--mass-scale', '2'],
         ]):
             with self.subTest(options=options), self.assertRaises(SystemExit):
                 self.invoke(*options, output=f'invalid-{i}')

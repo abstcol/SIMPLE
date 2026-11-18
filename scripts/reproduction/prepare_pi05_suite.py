@@ -6,12 +6,12 @@ condition with the selected model seeds; these trials never count toward the mai
 """
 import argparse
 import json
-import math
 from pathlib import Path
 
 from pi05_common import (
     checked_read, config_hash, decode_environment_config, select_tasks, sha256, validate_manifest, write_json,
 )
+from simple.physics import PhysicsConfig
 
 CATALOG_PATH = Path(__file__).with_name('pi05-tasks.json')
 
@@ -83,11 +83,13 @@ def main():
     parser.add_argument('--tasks', nargs='+', help='Environment names in execution order; omitted means all six')
     parser.add_argument('--model-seeds', nargs='+', type=int, default=[0, 1],
                         help='Sampling seeds; default 0 1. Simulation seed stays 0')
-    mass = parser.add_mutually_exclusive_group()
-    mass.add_argument('--mass-scale', type=float,
-                      help='Single target mass/inertia scale; retain legacy trial IDs')
-    mass.add_argument('--mass-scales', nargs='+', type=float,
-                      help='Target mass sweep; append each scale to trial IDs')
+    perturbations = parser.add_mutually_exclusive_group()
+    perturbations.add_argument('--physics-config', type=Path, metavar='JSON',
+                               help='Apply the physics settings in this JSON file to every trial')
+    perturbations.add_argument('--mass-scale', type=float,
+                               help='Single target mass/inertia scale; retain legacy trial IDs')
+    perturbations.add_argument('--mass-scales', nargs='+', type=float,
+                               help='Target mass sweep; append each scale to trial IDs')
     parser.add_argument('--hand-profile', choices=('current', 'pre_nov9'),
                         help='AMO hand profile; decoupled tasks retain their own controller')
     args = parser.parse_args()
@@ -96,9 +98,20 @@ def main():
         parser.error('--model-seeds must be unique integers in [0, 2**63)')
     scales = args.mass_scales if args.mass_scales is not None else (
         [args.mass_scale] if args.mass_scale is not None else None)
-    if scales is not None and (len(set(scales)) != len(scales)
-            or any(not math.isfinite(scale) or scale <= 0 for scale in scales)):
-        parser.error('Mass scales must be unique finite positive values')
+    physics_config = None
+    try:
+        if scales is not None:
+            if len(set(scales)) != len(scales):
+                raise ValueError('Mass scales must be unique')
+            for scale in scales:
+                PhysicsConfig.from_dict({'mass': {'scale': scale}})
+        if args.physics_config is not None:
+            physics_config = json.loads(args.physics_config.read_text())
+            if not isinstance(physics_config, dict):
+                raise ValueError('--physics-config must contain a JSON object')
+            PhysicsConfig.from_dict(physics_config)
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
     catalog_path = CATALOG_PATH
     catalog = json.loads(catalog_path.read_text())
     if len(catalog['contracts']) != 6:
@@ -119,6 +132,8 @@ def main():
                 record = {**base}
                 if scale is not None:
                     record['physics'] = dict(enabled=True, mass_scale=scale)
+                elif physics_config:
+                    record['physics'] = physics_config
                 if args.mass_scales is not None:
                     label = repr(scale).removesuffix('.0').replace('+', '')
                     record['trial_id'] += f'_mass_{label}'
@@ -137,6 +152,8 @@ def main():
                'catalog_sha256': sha256(catalog_path.read_bytes()),
                'note': 'Initial conditions vary within one scene UID per task; these are not ten different rooms.',
                'tasks': []}
+    if physics_config is not None:
+        summary['physics'] = physics_config
     for records, task_summary in prepared:
         filename = task_summary['env_id'].removeprefix('simple/') + '.json'
         path = args.output / filename
