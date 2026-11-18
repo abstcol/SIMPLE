@@ -31,18 +31,21 @@ NEUTRAL_HEAD = [0., 0., .40]
 WRIST_OFFSETS = ([.18, -.025, 0.], [.18, .025, 0.])
 
 
-def planner_packet(base, wrists, forward, facing):
+def planner_packet(base, wrists, movement, speed, facing):
     """Convert world-frame wrist-link targets to the native three-point input."""
     if wrists is None:
         return build_planner_message(IDLE, (0., 0., 0.), facing)
     to_local = Rotation.from_quat(base[3:7], scalar_first=True).inv()
     positions, orientations = [], []
     for (position, rotation), offset in zip(wrists, WRIST_OFFSETS):
-        positions.extend(to_local.apply(position + rotation.apply(offset) - base[:3]))
+        point = to_local.apply(position + rotation.apply(offset) - base[:3])
+        # Keep the absolute target from running away when the base steps back.
+        point[0] = min(point[0], .40)
+        positions.extend(point)
         orientations.extend((to_local * rotation).as_quat(scalar_first=True))
     return build_planner_message(
-        SLOW_WALK if forward else IDLE, facing if forward else (0., 0., 0.), facing,
-        speed=forward if forward else -1.,
+        SLOW_WALK if speed else IDLE, movement, facing,
+        speed=speed if speed else -1.,
         left_hand_position=[0.] * 7, right_hand_position=[0.] * 7,
         vr_3pt_position=positions + NEUTRAL_HEAD,
         vr_3pt_orientation=orientations + [1., 0., 0., 0.],
@@ -182,20 +185,27 @@ def run(args, trial):
                 if controller.poll() is not None or time.monotonic() >= deadline:
                     raise RuntimeError('SONIC did not engage. See controller.log.')
                 pub.send(build_command_message(start=True, stop=False, planner=True))
-                pub.send(planner_packet(data.qpos[:7], None, 0., facing))
+                pub.send(planner_packet(data.qpos[:7], None, (0., 0., 0.), 0., facing))
                 time.sleep(.04)
             heartbeat_stop.set()
             heartbeat.join()
             last_goals = current_wrists()
 
-            def tick(phase, goals, forward=0.):
+            def tick(phase, goals, stage_base=None):
                 nonlocal next_substep, last_goals
                 if goals is not None:
                     last_goals = goals
                 next_substep = time.monotonic()
                 if controller.poll() is not None:
                     raise RuntimeError('SONIC exited. See controller.log.')
-                pub.send(planner_packet(data.qpos[:7], goals, forward, facing))
+                movement, speed = (0., 0., 0.), 0.
+                if stage_base is not None:
+                    error = stage_base - data.qpos[:2]
+                    distance = np.linalg.norm(error)
+                    if distance > .035:
+                        movement = (*list(error / distance), 0.)
+                        speed = float(np.clip(1.5 * distance, .10, .19))
+                pub.send(planner_packet(data.qpos[:7], goals, movement, speed, facing))
                 action.parameters.update(low_cmd=bridge.low_cmd, left_hand_cmd=bridge.left_hand_cmd,
                                          right_hand_cmd=bridge.right_hand_cmd)
                 _, _, terminated, _, _ = env.step(action)
@@ -205,7 +215,7 @@ def run(args, trial):
                                  displacement_m=(pos - initial).tolist(),
                                  pelvis_xyz_m=data.qpos[:3].tolist(),
                                  pelvis_quat_wxyz=data.qpos[3:7].tolist(),
-                                 navigation_speed_mps=forward,
+                                 navigation_speed_mps=speed,
                                  standing=bool(data.qpos[2] > .54),
                                  task_success=bool(terminated),
                                  contacts_n={key: force.tolist() for key, force in contacts.items()},
@@ -214,7 +224,7 @@ def run(args, trial):
                 if len(rows) % 2 == 0:
                     frames.append(data.qpos.copy())
 
-            def move(phase, steps, goals, follow_box=False):
+            def move(phase, steps, goals, follow_box=False, stage_base=None):
                 origins = last_goals
                 for step in range(steps):
                     ratio = (step + 1) / steps
@@ -225,7 +235,7 @@ def run(args, trial):
                     targets = [(p0 + fraction * (p1 + shift - p0),
                                 Rotation.from_rotvec(fraction * (r1 * r0.inv()).as_rotvec()) * r0)
                                for (p0, r0), (p1, r1) in zip(origins, goals)]
-                    tick(phase, targets)
+                    tick(phase, targets, stage_base=stage_base)
                     if not rows[-1]['standing']:
                         break
                 print(phase, rows[-1]['displacement_m'], list(rows[-1]['contacts_n']), flush=True)
@@ -244,9 +254,10 @@ def run(args, trial):
                 if not rows[-1]['standing']:
                     break
             last_goals = current_wrists()
-            if rows[-1]['standing'] and move('approach', 105, cradle(.145, .076)):
-                if move('cup', 105, cradle(.045, .046)):
-                    move('preload', 65, cradle(.033, .046), follow_box=True)
+            stage_base = np.array([edge - .22, initial[1]])
+            if rows[-1]['standing'] and move('approach', 125, cradle(.145, .076), stage_base=stage_base):
+                if move('cup', 110, cradle(.045, .046), stage_base=stage_base):
+                    move('preload', 85, cradle(.033, .046), follow_box=True, stage_base=stage_base)
             if rows[-1]['standing'] and rows[-1]['phase'] == 'preload':
                 lifted = cradle(.033, .175)
                 if move('lift', 145, lifted, follow_box=True):
