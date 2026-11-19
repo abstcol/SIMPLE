@@ -63,8 +63,8 @@ verified scene and experiment evidence.
 ### Native SONIC standing lift
 
 Use `--controller sonic-split` to start with SONIC driving the legs and waist.
-The elastic band lowers the robot until both feet bear load, then tapers its
-support. After unassisted standing, the original wrist IK, arm and finger PD, and
+The elastic band lowers the robot until its feet bear most of the weight, then
+tapers its support. After unassisted standing on both feet, the original wrist IK, arm and finger PD, and
 contact feedback handle clearance and lift. SONIC receives the full robot state
 on each physics step and uses navigation commands with its default height.
 

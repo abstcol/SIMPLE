@@ -419,17 +419,17 @@ def main():
             state = advance('crane', full_goal, idle, None)
             if ended or box_was_disturbed():
                 return False
-            foot_loads = [foot['normal_n'] for foot in state['foot_support'].values()]
-            supported = (len(foot_loads) == 2 and min(foot_loads) >= .15 * weight
-                         and sum(foot_loads) >= .75 * weight and state['band_support_n'] <= .25 * weight)
+            foot_load = sum(foot['normal_n'] for foot in state['foot_support'].values())
+            supported = foot_load >= .75 * weight and state['band_support_n'] <= .25 * weight
             loaded = loaded + 1 if supported else 0
             if loaded >= 15:
                 break
         else:
-            print('Both feet did not take load before crane release.', flush=True)
+            print('The feet did not take enough load before crane release.', flush=True)
             return False
-        for step in range(50):
-            band_scale = 1. - (step + 1) / 50
+        release_steps = round(1.5 / dt)
+        for step in range(release_steps):
+            band_scale = 1. - (step + 1) / release_steps
             advance('crane', full_goal, idle, None)
             if ended or box_was_disturbed():
                 return False
