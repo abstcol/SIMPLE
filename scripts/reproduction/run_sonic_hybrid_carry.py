@@ -195,7 +195,8 @@ def run(args, trial):
         try:
             # Start above the box so SONIC's motor ramp can run without
             # contacting it. Use the same lowering sequence as the flat-ground probe.
-            data.qpos[2] = .94
+            robot.elastic_band.point[2] = 1.20
+            data.qpos[2] = 1.15
             data.qvel[:6] = 0.
             mujoco.mj_forward(model, data)
             proprio = robot_state()
@@ -282,8 +283,9 @@ def run(args, trial):
 
             raw.substep_callback = pace_substep
             warmup_crane()
-            for step in range(250):
-                robot.elastic_band.length = -.20 * min(1., step / 175)
+            for step in range(305):
+                # Give the planner time to acquire the stow pose above the box.
+                robot.elastic_band.length = -.40 * float(np.clip((step - 80) / 175, 0., 1.))
                 tick('startup', None)
             for step in range(75):
                 startup_support = 1. - (step + 1) / 75
