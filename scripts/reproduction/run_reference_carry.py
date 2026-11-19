@@ -367,27 +367,6 @@ def main():
         with ExitStack() as resources:
             if early_contacts or np.linalg.norm(initial - spawn_box) > .01:
                 raise RuntimeError(f'Stabilization disturbed the box: {sorted(early_contacts)}')
-            if args.controller == 'sonic':
-                from sonic_reference import SonicReference
-                sonic = resources.enter_context(SonicReference(raw.task.robot, config, args.output))
-                heading = yaw_rotation(data.qpos)
-                sonic.engage(float(np.arctan2(heading[1, 0], heading[0, 0])))
-                handover_pass = False
-                for _ in range(125):
-                    advance('handover', full_goal, [0., 0., 0., 0.], [])
-                    early_contacts.update(substep_contacts)
-                    if ended or early_contacts or np.linalg.norm(data.body(target).xpos - spawn_box) > .01:
-                        break
-                    if len(rows) >= 25:
-                        poses = np.array([row['pelvis'][:3] for row in rows[-25:]])
-                        if poses[:, 2].min() > .65 and np.linalg.norm(np.ptp(poses, axis=0)) < .04:
-                            handover_pass = True
-                            break
-                travel = np.ptp(np.array([row['pelvis'][:3] for row in rows[-25:]]), axis=0)
-                print('SONIC handover', bool(handover_pass), 'base motion', travel.tolist(),
-                      'contacts', sorted(early_contacts), flush=True)
-                if not handover_pass:
-                    return
             for name, steps, goals in stages:
                 origins = [(data.body(ik.arms[side][0]).xpos.copy(),
                             data.body(ik.arms[side][0]).xmat.reshape(3, 3).copy()) for side in SIDES]
@@ -443,6 +422,31 @@ def main():
                     if early_contacts or np.linalg.norm(data.body(target).xpos - spawn_box) > .01:
                         print('Early robot contact or box motion before approach.', flush=True)
                         break
+                if args.controller == 'sonic' and name == 'clear_box' and not ended:
+                    from sonic_reference import SonicReference
+                    sonic = resources.enter_context(SonicReference(raw.task.robot, config, args.output))
+                    heading = yaw_rotation(data.qpos)
+                    sonic.engage(float(np.arctan2(heading[1, 0], heading[0, 0])))
+                    wrist_reference = [position.tolist() for position, _ in goals]
+                    handover_pass = False
+                    for handover_step in range(125):
+                        advance('handover', full_goal, [0., 0., 0., 0.], wrist_reference)
+                        early_contacts.update(substep_contacts)
+                        if ended or early_contacts or np.linalg.norm(data.body(target).xpos - spawn_box) > .01:
+                            break
+                        if handover_step >= 24:
+                            window = rows[-25:]
+                            poses = np.array([row['pelvis'][:3] for row in window])
+                            wrist_error = np.linalg.norm(np.array([row['wrists'] for row in window]) - wrist_reference, axis=2)
+                            if (poses[:, 2].min() > .65 and np.linalg.norm(np.ptp(poses, axis=0)) < .04
+                                    and wrist_error.max() <= .06):
+                                handover_pass = True
+                                break
+                    travel = np.ptp(np.array([row['pelvis'][:3] for row in rows[-25:]]), axis=0)
+                    print('SONIC handover', bool(handover_pass), 'base motion', travel.tolist(),
+                          'contacts', sorted(early_contacts), flush=True)
+                    if not handover_pass:
+                        return
                 if name == 'lift' and lift_progress < 100:
                     print('Lift paused because the hands did not maintain inward pressure.', flush=True)
                     break
