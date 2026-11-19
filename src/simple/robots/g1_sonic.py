@@ -442,6 +442,10 @@ class G1Sonic(CuRoboMixin,Humanoid,Robot,HeadCamMountable,HasDexterousHand):
                 dq_cur = self.mjData.qvel[self.body_joint_index + self.qvel_offset - 1]
 
                 body_torques = kp * (target_q - q_cur) + kd * (0 - dq_cur)
+                sonic_indices = action_cmd["sonic_body_indices"]
+                if sonic_indices is not None:
+                    sonic_torques = self.compute_body_torques(action_cmd["low_cmd"], action_cmd["use_sensor"])
+                    body_torques[sonic_indices] = sonic_torques[sonic_indices]
                 self.torques[self.body_joint_index - 1] = body_torques
 
                 # Hand PD control (driven by trigger/grip via decoupled WBC teleop IK)

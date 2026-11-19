@@ -67,6 +67,11 @@ original clearance pose. The SONIC run then hands over execution, using
 the same wrist IK and contact feedback to send upper-body joint, hand and
 navigation references to SONIC's native planner.
 
+Use `--controller sonic-split` to compare locomotion controllers while keeping
+the reference arm and finger PD. SONIC receives the full robot state and planner
+references. Only the motors in the GR00T lower-body group (legs and waist) use
+the SONIC command.
+
 Use the [project simulator environment](isaac-blackwell.md#local-activation-and-paths)
 with PyZMQ and the [native SONIC models](https://nvlabs.github.io/GR00T-WholeBodyControl/getting_started/download_models.html).
 
@@ -76,10 +81,11 @@ bash scripts/build_sonic_controller.sh
 source "$SONIC_TOOLS_DIR/sonic_env.sh"
 
 MUJOCO_GL=egl python scripts/reproduction/run_reference_carry.py \
-  --manifest PATH --trial episode_000_seed_0_mass_1 --controller sonic --output NEW_DIR
+  --manifest PATH --trial episode_000_seed_0_mass_1 --controller sonic-split --output NEW_DIR
 ```
 
 Use the default controller to run the paired GR00T control. Both runs record
-early contacts, wrist tracking, forces on the box and its displacement. The
+early contacts, wrist tracking, forces on the box and its displacement, and
+the tangential velocity and load at foot-ground contacts. The
 lift check requires the box to stay at least 5 cm above the initial height
 for 0.5 seconds with bilateral arm contact and no table contact.

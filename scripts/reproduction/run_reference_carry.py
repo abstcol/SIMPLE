@@ -118,6 +118,34 @@ def lateral_pressure(forces, side, sign):
                        if name.startswith(side + '_') and ('hand' in name or 'wrist' in name))
 
 
+def foot_support(model, data, ground, feet):
+    """Measure loaded foot contacts and tangential velocity at the contact point."""
+    support = {}
+    wrench = np.zeros(6)
+    velocity = np.zeros(6)
+    for i, contact in enumerate(data.contact[:data.ncon]):
+        if ground not in (contact.geom1, contact.geom2):
+            continue
+        body = int(model.geom_bodyid[contact.geom2 if contact.geom1 == ground else contact.geom1])
+        if body not in feet:
+            continue
+        mujoco.mj_contactForce(model, data, i, wrench)
+        normal = float(wrench[0])
+        if normal <= 5.:
+            continue
+        mujoco.mj_objectVelocity(model, data, mujoco.mjtObj.mjOBJ_XBODY, body, velocity, 0)
+        point_velocity = velocity[3:] + np.cross(velocity[:3], contact.pos - data.xpos[body])
+        tangent_speed = float(np.linalg.norm(contact.frame.reshape(3, 3)[1:] @ point_velocity))
+        foot = support.setdefault(feet[body], {'normal_n': 0., 'max_tangent_speed_mps': 0.,
+                                              'max_tangent_to_normal': 0.,
+                                              'sliding_friction': contact.friction[:2].tolist()})
+        foot['normal_n'] += normal
+        foot['max_tangent_speed_mps'] = max(foot['max_tangent_speed_mps'], tangent_speed)
+        foot['max_tangent_to_normal'] = max(foot['max_tangent_to_normal'],
+                                           float(np.linalg.norm(wrench[1:3]) / normal))
+    return support
+
+
 def held_above_table(rows, initial_height):
     window = [row for row in rows if row['stage'] == 'hold'][-25:]
     return len(window) == 25 and all(
@@ -148,7 +176,7 @@ def main():
     parser.add_argument('--manifest', type=Path, required=True)
     parser.add_argument('--trial', required=True)
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--controller', choices=('gr00t', 'sonic'), default='gr00t')
+    parser.add_argument('--controller', choices=('gr00t', 'sonic', 'sonic-split'), default='gr00t')
     parser.add_argument('--carry', action='store_true', help='Continue to the second table after passing the lift check.')
     args = parser.parse_args()
     records = validate_manifest(json.loads(args.manifest.read_text()))
@@ -185,6 +213,8 @@ def main():
     policy.lower_body_policy.use_policy_action = True
     dt = 4 * config['SIMULATE_DT']
     model, data = raw.mjModel, raw.mjData
+    ground = model.geom('ground').id
+    feet = {model.body(f'{side}_ankle_roll_link').id: side for side in SIDES}
     target = raw.mujoco.mj_objects['target'].id
     spawn_box = data.body(target).xpos.copy()
     pelvis = model.body('pelvis').id
@@ -220,6 +250,10 @@ def main():
     robot_model = agent._dwbc_robot_model
     ik = WristIK(model, data, robot_model)
     upper = agent._upper_body_indices
+    # Match the original WBC's motor ownership, including the waist, in MuJoCo order.
+    lower_mask = np.zeros(robot_model.num_dofs, dtype=bool)
+    lower_mask[robot_model.get_joint_group_indices('lower_body')] = True
+    lower_motors = np.flatnonzero(robot_model.get_body_actuated_joints(lower_mask))
     full_goal = robot_model.get_configuration_from_actuated_joints(
         body_actuated_joint_values=raw.task.robot.prepare_obs()['body_q'],
         left_hand_actuated_joint_values=np.zeros(7), right_hand_actuated_joint_values=np.zeros(7))
@@ -267,27 +301,33 @@ def main():
     def advance(stage, joint_goal, navigation, wrist_targets, base_height=.74):
         nonlocal obs, loads, ended, official_success_step, sonic_action, physics_deadline
         now = time.monotonic()
-        if sonic is not None:
-            commands = dict(target_q=robot_model.get_body_actuated_joints(joint_goal),
-                            left_hand_q=robot_model.get_hand_actuated_joints(joint_goal, side='left'),
-                            right_hand_q=robot_model.get_hand_actuated_joints(joint_goal, side='right'))
-            rotation = yaw_rotation(data.qpos)
-            heading = float(np.arctan2(rotation[1, 0], rotation[0, 0]))
-            action = sonic_action = sonic.action(commands['target_q'], commands['left_hand_q'],
-                                                 commands['right_hand_q'], navigation, base_height, heading)
-            physics_deadline = max(now - .005, physics_deadline)
-        else:
+        q = joint_goal
+        split = sonic is not None and args.controller == 'sonic-split'
+        if sonic is None or split:
             policy.set_observation(agent._build_wbc_observation(raw.task.robot.prepare_obs()))
             policy.set_goal({'target_upper_body_pose': joint_goal[upper], 'navigate_cmd': navigation,
                              'base_height_command': np.array([base_height]),
                              'target_time': now + 1 / agent._control_frequency,
                              'interpolation_garbage_collection_time': now - 2 / agent._control_frequency,
                              'timestamp': now})
-            q = policy.get_action(time=now)['q']
-            action = ActionCmd('decoupled_wbc', target_q=robot_model.get_body_actuated_joints(q),
-                               left_hand_q=robot_model.get_hand_actuated_joints(q, side='left'),
-                               right_hand_q=robot_model.get_hand_actuated_joints(q, side='right'))
-            commands = action.parameters
+            if split:
+                q = joint_goal.copy()
+                q[upper] = policy.upper_body_policy.get_action(now)['target_upper_body_pose']
+            else:
+                q = policy.get_action(time=now)['q']
+        commands = dict(target_q=robot_model.get_body_actuated_joints(q),
+                        left_hand_q=robot_model.get_hand_actuated_joints(q, side='left'),
+                        right_hand_q=robot_model.get_hand_actuated_joints(q, side='right'))
+        action = ActionCmd('decoupled_wbc', **commands)
+        if sonic is not None:
+            if split:
+                action.parameters['sonic_body_indices'] = lower_motors
+            rotation = yaw_rotation(data.qpos)
+            heading = float(np.arctan2(rotation[1, 0], rotation[0, 0]))
+            action = sonic_action = sonic.action(commands['target_q'], commands['left_hand_q'],
+                                                 commands['right_hand_q'], navigation, base_height, heading,
+                                                 split_action=action if split else None)
+            physics_deadline = max(now - .005, physics_deadline)
         substep_contacts.clear()
         obs, reward, terminated, truncated, info = env.step(action)
         loads = forces_on_target(model, data, target)
@@ -299,6 +339,7 @@ def main():
                  'target_contact_bodies': sorted(loads), 'target_contact_forces_n': loads,
                  'commands': commands, 'lift_progress': lift_progress,
                  'robot_contacts_over_tick': sorted(substep_contacts),
+                 'foot_support': foot_support(model, data, ground, feet),
                  'object_displacement_m': data.body(target).xpos - spawn_box}
         if sonic is not None:
             state['sonic_motor_target_q'] = [float(m.q) for m in action['low_cmd'].motor_cmd[:29]]
@@ -422,7 +463,7 @@ def main():
                     if early_contacts or np.linalg.norm(data.body(target).xpos - spawn_box) > .01:
                         print('Early robot contact or box motion before approach.', flush=True)
                         break
-                if args.controller == 'sonic' and name == 'clear_box' and not ended:
+                if args.controller != 'gr00t' and name == 'clear_box' and not ended:
                     from sonic_reference import SonicReference
                     sonic = resources.enter_context(SonicReference(raw.task.robot, config, args.output))
                     heading = yaw_rotation(data.qpos)
@@ -463,6 +504,8 @@ def main():
         result = {'trial_id':trial['trial_id'], 'approach':'tracking-cradle',
                   'target_mass_kg':float(model.body_mass[target]),
                   'controller': args.controller, 'startup_wbc': 'gr00t', 'handover_pass': handover_pass,
+                  'sonic_joints': [raw.task.robot.joint_names[i] for i in lower_motors]
+                  if args.controller == 'sonic-split' else None,
                   'early_robot_contacts': sorted(early_contacts),
                   'hand_torque_limits_nm':hand_limits[raw.task.robot.right_hand_index - 1].tolist(),
                   'target_initial_height_m':float(z), 'max_lift_m':max(z_values, default=z)-z,

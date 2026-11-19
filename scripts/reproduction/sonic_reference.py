@@ -114,15 +114,17 @@ class SonicReference:
                 time.sleep(.025)
         raise RuntimeError('SONIC did not engage. See sonic-controller.log.')
 
-    def action(self, body, left, right, navigation, height, heading):
+    def action(self, body, left, right, navigation, height, heading, split_action=None):
         if self.process.poll() is not None:
             raise RuntimeError('SONIC exited. See sonic-controller.log.')
         self.publisher.send(planner_packet(body, left, right, navigation, height, heading))
-        action = ActionCmd('wbc_torque', use_sensor=self.bridge.use_sensor)
+        action = split_action if split_action is not None else ActionCmd('wbc_torque')
+        action.parameters['use_sensor'] = self.bridge.use_sensor
         self.refresh_action(action)
         return action
 
     def refresh_action(self, action):
-        action.parameters.update(low_cmd=self.bridge.low_cmd,
-                                 left_hand_cmd=self.bridge.left_hand_cmd,
-                                 right_hand_cmd=self.bridge.right_hand_cmd)
+        action.parameters['low_cmd'] = self.bridge.low_cmd
+        if action.type == 'wbc_torque':
+            action.parameters.update(left_hand_cmd=self.bridge.left_hand_cmd,
+                                     right_hand_cmd=self.bridge.right_hand_cmd)
