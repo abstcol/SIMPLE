@@ -166,7 +166,7 @@ def main():
     clear_registry_instances(TaskRegistry, RobotRegistry)
     config = SimLoopConfig().load_wbc_yaml()
     config['ENV_NAME'] = 'simple'
-    env = gym.make(TASK, sim_mode='mujoco', headless=True, webrtc=False, render_hz=50,
+    env = gym.make(TASK, sim_mode='mujoco', headless=True, webrtc=False, render_hz=50, disable_env_checker=True,
                    sonic_config=config, physics=trial.get('physics'))
     raw = env.unwrapped
     raw.mujoco.upstream_object_gravity = True
