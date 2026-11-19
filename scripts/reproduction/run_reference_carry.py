@@ -1,6 +1,7 @@
-"""Check two-arm support using simulator state, a frozen trial and the existing GR00T-WBC."""
+"""Check two-arm support using simulator state, a frozen trial and GR00T-WBC or native SONIC."""
 
 import argparse
+from contextlib import ExitStack
 import json
 import math
 import random
@@ -147,6 +148,7 @@ def main():
     parser.add_argument('--manifest', type=Path, required=True)
     parser.add_argument('--trial', required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--controller', choices=('gr00t', 'sonic'), default='gr00t')
     parser.add_argument('--carry', action='store_true', help='Continue to the second table after passing the lift check.')
     args = parser.parse_args()
     records = validate_manifest(json.loads(args.manifest.read_text()))
@@ -177,23 +179,38 @@ def main():
     policy = agent._wbc_policy
     policy.lower_body_policy.use_policy_action = True
     dt = 4 * config['SIMULATE_DT']
+    model, data = raw.mjModel, raw.mjData
+    target = raw.mujoco.mj_objects['target'].id
+    spawn_box = data.body(target).xpos.copy()
+    pelvis = model.body('pelvis').id
+    robot_bodies = {model.body(i).name for i in range(model.nbody)
+                    if model.body_rootid[i] == pelvis}
+    early_contacts = set()
+    substep_contacts = set()
+    sonic = None
+
+    def observe_substep():
+        substep_contacts.update(robot_bodies.intersection(forces_on_target(model, data, target)))
+        if sonic is not None:
+            sonic.cache_state()
+
+    raw.substep_callback = observe_substep
     for _ in range(300):
         if raw.task.robot.stabilized:
             break
         start = time.monotonic()
         obs, *_ = raw.step(agent.get_stabilize_action(obs))
         raw.update_reward()
+        early_contacts.update(substep_contacts)
         time.sleep(max(0, dt - (time.monotonic() - start)))
     policy.lower_body_policy.gait_indices = torch.zeros((1,), dtype=torch.float32)
 
-    model, data = raw.mjModel, raw.mjData
     robot_model = agent._dwbc_robot_model
     ik = WristIK(model, data, robot_model)
     upper = agent._upper_body_indices
     full_goal = robot_model.get_configuration_from_actuated_joints(
         body_actuated_joint_values=raw.task.robot.prepare_obs()['body_q'],
         left_hand_actuated_joint_values=np.zeros(7), right_hand_actuated_joint_values=np.zeros(7))
-    target = raw.mujoco.mj_objects['target'].id
     container = raw.mujoco.mj_objects['container'].id
     container_name = model.body(container).name
     table = model.geom('table_geom')
@@ -238,16 +255,27 @@ def main():
     def advance(stage, joint_goal, navigation, wrist_targets, video, base_height=.74):
         nonlocal obs, loads, ended, official_success_step
         now = time.monotonic()
-        policy.set_observation(agent._build_wbc_observation(raw.task.robot.prepare_obs()))
-        policy.set_goal({'target_upper_body_pose': joint_goal[upper], 'navigate_cmd': navigation,
-                         'base_height_command': np.array([base_height]),
-                         'target_time': now + 1 / agent._control_frequency,
-                         'interpolation_garbage_collection_time': now - 2 / agent._control_frequency,
-                         'timestamp': now})
-        q = policy.get_action(time=now)['q']
-        action = ActionCmd('decoupled_wbc', target_q=robot_model.get_body_actuated_joints(q),
-                           left_hand_q=robot_model.get_hand_actuated_joints(q, side='left'),
-                           right_hand_q=robot_model.get_hand_actuated_joints(q, side='right'))
+        if sonic is not None:
+            commands = dict(target_q=robot_model.get_body_actuated_joints(joint_goal),
+                            left_hand_q=robot_model.get_hand_actuated_joints(joint_goal, side='left'),
+                            right_hand_q=robot_model.get_hand_actuated_joints(joint_goal, side='right'))
+            rotation = yaw_rotation(data.qpos)
+            heading = float(np.arctan2(rotation[1, 0], rotation[0, 0]))
+            action = sonic.action(commands['target_q'], commands['left_hand_q'],
+                                  commands['right_hand_q'], navigation, base_height, heading)
+        else:
+            policy.set_observation(agent._build_wbc_observation(raw.task.robot.prepare_obs()))
+            policy.set_goal({'target_upper_body_pose': joint_goal[upper], 'navigate_cmd': navigation,
+                             'base_height_command': np.array([base_height]),
+                             'target_time': now + 1 / agent._control_frequency,
+                             'interpolation_garbage_collection_time': now - 2 / agent._control_frequency,
+                             'timestamp': now})
+            q = policy.get_action(time=now)['q']
+            action = ActionCmd('decoupled_wbc', target_q=robot_model.get_body_actuated_joints(q),
+                               left_hand_q=robot_model.get_hand_actuated_joints(q, side='left'),
+                               right_hand_q=robot_model.get_hand_actuated_joints(q, side='right'))
+            commands = action.parameters
+        substep_contacts.clear()
         obs, reward, terminated, truncated, info = env.step(action)
         loads = forces_on_target(model, data, target)
         state = {'stage': stage, 'step': len(rows) + 1, 'target': info['target'].tolist(),
@@ -256,7 +284,9 @@ def main():
                  'wrists': [data.body(ik.arms[s][0]).xpos.tolist() for s in SIDES],
                  'wrist_targets': wrist_targets, 'navigate_cmd': list(navigation), 'base_height_command': base_height,
                  'target_contact_bodies': sorted(loads), 'target_contact_forces_n': loads,
-                 'commands': action.parameters, 'lift_progress': lift_progress}
+                 'commands': commands, 'lift_progress': lift_progress,
+                 'robot_contacts_over_tick': sorted(substep_contacts),
+                 'object_displacement_m': data.body(target).xpos - spawn_box}
         rows.append(state)
         if len(rows) % 2 == 0:
             if stage in ('carry', 'release', 'settle'):
@@ -322,7 +352,15 @@ def main():
                 return
 
     try:
-        with imageio.get_writer(args.output / 'overview.mp4', fps=25, codec='libx264') as video:
+        with ExitStack() as resources:
+            video = resources.enter_context(imageio.get_writer(args.output / 'overview.mp4', fps=25, codec='libx264'))
+            if early_contacts or np.linalg.norm(initial - spawn_box) > .01:
+                raise RuntimeError(f'Stabilization disturbed the box: {sorted(early_contacts)}')
+            if args.controller == 'sonic':
+                from sonic_reference import SonicReference
+                sonic = resources.enter_context(SonicReference(raw.task.robot, config, args.output))
+                heading = yaw_rotation(data.qpos)
+                sonic.engage(float(np.arctan2(heading[1, 0], heading[0, 0])))
             for name, steps, goals in stages:
                 origins = [(data.body(ik.arms[side][0]).xpos.copy(),
                             data.body(ik.arms[side][0]).xmat.reshape(3, 3).copy()) for side in SIDES]
@@ -373,6 +411,11 @@ def main():
                       'wrists', np.round(stage_rows[-1]['wrists'], 3).tolist(),
                       'contacts', {body: np.round(force, 1).tolist() for body, force in loads.items()}, flush=True)
                 previous_goals = goals
+                if name in ('clear_box', 'step_closer'):
+                    early_contacts.update(c for row in stage_rows for c in row['robot_contacts_over_tick'])
+                    if early_contacts or np.linalg.norm(data.body(target).xpos - spawn_box) > .01:
+                        print('Early robot contact or box motion before approach.', flush=True)
+                        break
                 if name == 'lift' and lift_progress < 100:
                     print('Lift paused because the hands did not maintain inward pressure.', flush=True)
                     break
@@ -390,6 +433,8 @@ def main():
         print('initial', initial.tolist(), 'table edge/top', [edge, top], flush=True)
         result = {'trial_id':trial['trial_id'], 'approach':'tracking-cradle',
                   'target_mass_kg':float(model.body_mass[target]),
+                  'controller': args.controller, 'startup_wbc': 'gr00t',
+                  'early_robot_contacts': sorted(early_contacts),
                   'hand_torque_limits_nm':hand_limits[raw.task.robot.right_hand_index - 1].tolist(),
                   'target_initial_height_m':float(z), 'max_lift_m':max(z_values, default=z)-z,
                   'lift_and_hold_pass':held_above_table(rows, z),

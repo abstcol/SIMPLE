@@ -62,33 +62,23 @@ verified scene and experiment evidence.
 
 ### Native SONIC standing lift
 
-The standing-lift probe uses the same frozen two-table scene at both masses.
-A scripted expert sends navigation, two wrist poses, a fixed head reference and
-open-finger targets through the SONIC planner interface. The transport task's
-success condition is preserved. The probe additionally measures whether the box
-clears its initial position by 5 cm for 0.5 seconds, with bilateral arm contact
-and without table contact, during the hold.
+The original reference expert stabilizes the robot with GR00T, computes the
+same wrist IK and contact feedback, then sends its upper-body joint, hand and
+navigation references to SONIC's native planner.
 
-Use the project simulator environment and its source paths from
-[the 5090 setup](isaac-blackwell.md#local-activation-and-paths), with PyZMQ available.
-Install the encoder, decoder and planner using [NVIDIA's checkpoint
-instructions](https://nvlabs.github.io/GR00T-WholeBodyControl/getting_started/download_models.html).
-Keep the native build dependencies under the project.
+Use the [project simulator environment](isaac-blackwell.md#local-activation-and-paths)
+with PyZMQ and the [native SONIC models](https://nvlabs.github.io/GR00T-WholeBodyControl/getting_started/download_models.html).
 
 ```bash
-export SONIC_TOOLS_DIR="$PWD/.tools/sonic"
-export UV_CACHE_DIR="$PWD/.cache/uv"
-export CMAKE_BUILD_PARALLEL_LEVEL=4
+export SONIC_TOOLS_DIR="$PWD/.tools/sonic" UV_CACHE_DIR="$PWD/.cache/uv"
 bash scripts/build_sonic_controller.sh
 source "$SONIC_TOOLS_DIR/sonic_env.sh"
 
-for mass in 1 10; do
-  MUJOCO_GL=egl python scripts/reproduction/run_sonic_hybrid_carry.py \
-    --manifest PATH --trial episode_000_seed_0_mass_10 \
-    --mass "$mass" --output "experiments/reproduction/sonic-hybrid-lift/mass-$mass"
-done
+MUJOCO_GL=egl python scripts/reproduction/run_reference_carry.py \
+  --manifest PATH --trial episode_000_seed_0_mass_1 --controller sonic --output NEW_DIR
 ```
 
-Each run saves the input trial, world-frame contact forces, box displacement,
-wrist tracking, a lift result and a third-person MuJoCo video. The planner
-runs at wall-clock pace, as in native SONIC teleoperation.
+Use the default controller to run the paired GR00T control. Both runs record
+early contacts, wrist tracking, forces on the box and its displacement. The
+lift check requires the box to stay at least 5 cm above the initial height
+for 0.5 seconds with bilateral arm contact and no table contact.
