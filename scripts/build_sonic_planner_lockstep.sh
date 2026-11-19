@@ -13,6 +13,6 @@ stage=$(mktemp -d "$SONIC_TOOLS_DIR/planner-lockstep.XXXXXX")
 trap 'rm -rf -- "$stage"' EXIT
 
 git -C "$upstream" archive "$revision" gear_sonic_deploy | tar -xf - -C "$stage"
-(cd "$stage" && git apply "$patch")
+patch --batch --directory="$stage" -p1 < "$patch"
 SONIC_BUILD_TARGET=g1_deploy_onnx_ref bash "$root/scripts/build_sonic_controller.sh" "$stage"
 install -m 755 "$stage/gear_sonic_deploy/target/release/g1_deploy_onnx_ref" "$SONIC_TOOLS_DIR/g1_deploy_planner_lockstep"
