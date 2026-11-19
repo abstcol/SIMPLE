@@ -244,6 +244,7 @@ def main():
     camera.lookat[:] = [edge - .08, y, .66]
     rows, frames = [], []
     ended = False
+    handover_pass = None
     official_success_step = None
     previous_goals = None
     lift_progress = 0
@@ -323,7 +324,7 @@ def main():
             else:
                 world_velocity = [-.19, 0.] if data.qpos[0] > edge - .38 else [0., 0.]
             local_velocity = heading[:2, :2].T @ world_velocity
-            advance('carry', joint_goal, [*local_velocity, 1., -np.pi], None, video, carry_height)
+            advance('carry', joint_goal, [*local_velocity, 1., -np.pi], None, carry_height)
             lost = lost + 1 if not any('hand' in body or 'wrist' in body for body in loads) else 0
             if ended or lost >= 10:
                 print('Carry stopped after contact loss or episode termination.', flush=True)
@@ -367,7 +368,7 @@ def main():
                     if ended or early_contacts or np.linalg.norm(data.body(target).xpos - spawn_box) > .01:
                         break
                 travel = np.ptp(np.array([row['pelvis'][:3] for row in rows[-20:]]), axis=0)
-                handover_pass = (len(rows) == 40 and not early_contacts and not ended
+                handover_pass = bool(len(rows) == 40 and not early_contacts and not ended
                                  and np.linalg.norm(data.body(target).xpos - spawn_box) <= .01
                                  and min(row['pelvis'][2] for row in rows[-20:]) > .65
                                  and np.linalg.norm(travel) < .04)
@@ -445,7 +446,7 @@ def main():
         print('initial', initial.tolist(), 'table edge/top', [edge, top], flush=True)
         result = {'trial_id':trial['trial_id'], 'approach':'tracking-cradle',
                   'target_mass_kg':float(model.body_mass[target]),
-                  'controller': args.controller, 'startup_wbc': 'gr00t',
+                  'controller': args.controller, 'startup_wbc': 'gr00t', 'handover_pass': handover_pass,
                   'early_robot_contacts': sorted(early_contacts),
                   'hand_torque_limits_nm':hand_limits[raw.task.robot.right_hand_index - 1].tolist(),
                   'target_initial_height_m':float(z), 'max_lift_m':max(z_values, default=z)-z,
