@@ -69,6 +69,7 @@ contact feedback handle clearance and lift. SONIC receives the full robot state
 and navigation together at each 20 ms simulation boundary, with its default
 height. The planner ticks every five control boundaries. MuJoCo advances four
 substeps only after matching body and hand acknowledgements arrive.
+The encoder uses the measured arm pose while keeping the planner's waist reference.
 
 Use `--controller sonic` to test the previous control handover after GR00T
 stabilization and wrist clearance.

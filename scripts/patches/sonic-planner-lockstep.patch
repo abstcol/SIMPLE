@@ -8,6 +8,24 @@
      
      bool reinitialize_heading_ = true;
      bool report_temperature_ = false;
+@@ -798,7 +799,7 @@
+             for (size_t i = 0; i < 29; i++) {
+               current_motion_joint_pos[i] = motion_joint_pos[i];
+             }
+-            for (size_t i = 0; i < 17; i++) {
++            for (size_t i = sim_lockstep_ && planner_ ? 3 : 0; i < 17; i++) {
+               current_motion_joint_pos[upper_body_joint_isaaclab_order_in_isaaclab_index[i]] = upper_body_joint_positions_buffer_[i];
+             }
+             std::copy(
+@@ -875,7 +876,7 @@
+               for (size_t i = 0; i < 29; i++) {
+                 current_motion_joint_vel[i] = motion_joint_vel[i];
+               }
+-              for (size_t i = 0; i < 17; i++) {
++              for (size_t i = sim_lockstep_ && planner_ ? 3 : 0; i < 17; i++) {
+                 current_motion_joint_vel[upper_body_joint_isaaclab_order_in_isaaclab_index[i]] = upper_body_joint_velocities_buffer_[i];
+               }
+               std::copy(
 @@ -2673,6 +2674,13 @@
                  << " first_token=" << first_token_received_ << std::endl;
        if (state_logger_) state_logger_->ResetHistoryKeepIndex();
@@ -88,7 +106,26 @@
          if (operator_state.stop) break;
          if (work->token.has_value()) {
            const auto consumed = input_interface_->GetLockstepTokenBundle();
-@@ -4650,8 +4708,8 @@
+@@ -3159,6 +3217,18 @@
+       std::tie(has_right_hand_data_, right_hand_joint_buffer_) = input_interface_->GetHandPose(false);
+       std::tie(has_upper_body_data_, upper_body_joint_positions_buffer_) = input_interface_->GetUpperBodyJointPositions();
+       std::tie(std::ignore, upper_body_joint_velocities_buffer_) = input_interface_->GetUpperBodyJointVelocities();
++
++      // The simulation owns the arm actuators in this mode. Hold the
++      // measured arm pose in the encoder reference and retain planned waist.
++      if (sim_lockstep_ && planner_) {
++        const auto& motors = used_low_state_data_.data->motor_state();
++        has_upper_body_data_ = true;
++        for (size_t i = 3; i < upper_body_joint_positions_buffer_.size(); ++i) {
++          upper_body_joint_positions_buffer_[i] =
++              motors[upper_body_joint_isaaclab_order_in_mujoco_index[i]].q();
++          upper_body_joint_velocities_buffer_[i] = 0.0;
++        }
++      }
+ 
+       auto last_update_time = input_interface_->GetLastUpdateTime();
+       if (!sim_lockstep_ && last_update_time.has_value()) {
+@@ -4650,8 +4720,8 @@
      std::cerr << "Error: --sim-lockstep requires --input-type zmq_manager" << std::endl;
      return 1;
    }

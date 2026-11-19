@@ -133,12 +133,15 @@ fi
 
 step "Build"
 mkdir -p "$DEPLOY/build"
+cmake_args=()
+if [[ -n "${SONIC_BUILD_RPATH:-}" ]]; then
+  cmake_args+=("-DCMAKE_BUILD_RPATH=$SONIC_BUILD_RPATH")
+fi
 cmake -S "$DEPLOY" -B "$DEPLOY/build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-  -DCMAKE_BUILD_RPATH="${SONIC_BUILD_RPATH:-}" \
   -DMSGPACK_INCLUDE_DIR="$BASE/msgpack-cxx-6.1.1/include" \
   -DZMQ_INCLUDE_DIR="$BASE/zmq-install/include" \
   -DZMQ_LIBRARY="$BASE/zmq-install/lib/libzmq.so" \
-  -DCMAKE_PREFIX_PATH="$BASE/eigen-install;$BASE/gtest-install"
+  -DCMAKE_PREFIX_PATH="$BASE/eigen-install;$BASE/gtest-install" "${cmake_args[@]}"
 build_args=()
 if [[ -n "${SONIC_BUILD_TARGET:-}" ]]; then
   build_args+=(--target "$SONIC_BUILD_TARGET")
