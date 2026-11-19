@@ -19,7 +19,7 @@ from simple.core.action import ActionCmd
 UPPER_BODY = [12, 13, 14, 15, 22, 16, 23, 17, 24, 18, 25, 19, 26, 20, 27, 21, 28]
 
 
-def planner_packet(body, left, right, navigation, height, heading):
+def planner_packet(body, left, right, navigation, heading):
     velocity = np.asarray(navigation[:2], dtype=float)
     speed = float(np.linalg.norm(velocity))
     c, s = np.cos(heading), np.sin(heading)
@@ -27,7 +27,7 @@ def planner_packet(body, left, right, navigation, height, heading):
     yaw = navigation[3]
     return build_planner_message(
         1 if speed else 0, (*movement, 0.), (np.cos(yaw), np.sin(yaw), 0.),
-        speed=speed or -1., height=height, upper_body_position=body[UPPER_BODY],
+        speed=speed or -1., upper_body_position=body[UPPER_BODY],
         left_hand_position=left, right_hand_position=right,
     )
 
@@ -99,7 +99,7 @@ class SonicReference:
     def engage(self, heading):
         state = self.state
         hold = planner_packet(state['body_q'], state['left_hand_q'], state['right_hand_q'],
-                              (0., 0., 0., heading), .74, heading)
+                              (0., 0., 0., heading), heading)
         start = build_command_message(start=True, stop=False, planner=True)
         deadline = time.monotonic() + 240
         planner_ready = False
@@ -114,10 +114,10 @@ class SonicReference:
                 time.sleep(.025)
         raise RuntimeError('SONIC did not engage. See sonic-controller.log.')
 
-    def action(self, body, left, right, navigation, height, heading):
+    def action(self, body, left, right, navigation, heading):
         if self.process.poll() is not None:
             raise RuntimeError('SONIC exited. See sonic-controller.log.')
-        self.publisher.send(planner_packet(body, left, right, navigation, height, heading))
+        self.publisher.send(planner_packet(body, left, right, navigation, heading))
         action = ActionCmd('wbc_torque', use_sensor=self.bridge.use_sensor)
         self.refresh_action(action)
         return action

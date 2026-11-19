@@ -65,7 +65,8 @@ verified scene and experiment evidence.
 Both runs use GR00T to stabilize the robot and move its wrists to the
 original clearance pose. The SONIC run then hands over execution, using
 the same wrist IK and contact feedback to send upper-body joint, hand and
-navigation references to SONIC's native planner.
+navigation references to SONIC's native planner. SONIC uses its stock
+planner height for the standing probe.
 
 Use the [project simulator environment](isaac-blackwell.md#local-activation-and-paths)
 with PyZMQ and the [native SONIC models](https://nvlabs.github.io/GR00T-WholeBodyControl/getting_started/download_models.html).

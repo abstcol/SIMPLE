@@ -274,7 +274,7 @@ def main():
             rotation = yaw_rotation(data.qpos)
             heading = float(np.arctan2(rotation[1, 0], rotation[0, 0]))
             action = sonic_action = sonic.action(commands['target_q'], commands['left_hand_q'],
-                                                 commands['right_hand_q'], navigation, base_height, heading)
+                                                 commands['right_hand_q'], navigation, heading)
             physics_deadline = max(now - .005, physics_deadline)
         else:
             policy.set_observation(agent._build_wbc_observation(raw.task.robot.prepare_obs()))
@@ -463,6 +463,7 @@ def main():
         result = {'trial_id':trial['trial_id'], 'approach':'tracking-cradle',
                   'target_mass_kg':float(model.body_mass[target]),
                   'controller': args.controller, 'startup_wbc': 'gr00t', 'handover_pass': handover_pass,
+                  'sonic_planner_height': 'native_default' if args.controller == 'sonic' else None,
                   'early_robot_contacts': sorted(early_contacts),
                   'hand_torque_limits_nm':hand_limits[raw.task.robot.right_hand_index - 1].tolist(),
                   'target_initial_height_m':float(z), 'max_lift_m':max(z_values, default=z)-z,
