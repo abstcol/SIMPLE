@@ -459,24 +459,37 @@ def main():
         box = data.body(target)
         basket = data.body(container)
         carry_height = .74
+        transport_goal = joint_goal.copy()
         lost = 0
-        for _ in range(365):
+        for _ in range(390 if native_start else 365):
             heading = yaw_rotation(data.qpos)
             facing_basket = heading[0, 0] < -.97
             if facing_basket:
-                # Keep the grasp references fixed. Align the carried box by
-                # moving the base, and raise the base before crossing the rim.
-                carry_height = .74 + .065 * float(np.clip((-data.qpos[0] - 1.30) / .28, 0., 1.))
+                # GR00T raises its base before crossing the rim. With SONIC's
+                # nominal walking height, use the same wrist IK to lift the box.
+                clearance = float(np.clip((-data.qpos[0] - 1.30) / .28, 0., 1.))
+                if not native_start:
+                    carry_height = .74 + .065 * clearance
                 error = basket.xpos[:2] - box.xpos[:2]
                 if np.linalg.norm(error) < .045 and box.xpos[2] > .86:
                     break
+                if native_start and clearance > 0.:
+                    # Extend the grasp near the basket while keeping the wrist orientations.
+                    reach = .12 * float(np.clip((.32 + error[0]) / .17, 0., 1.))
+                    offset = heading @ [reach, 0., .09 * clearance]
+                    for side, (position, rotation) in zip(SIDES, ik.wrist_poses(data, joint_goal)):
+                        ids, angles = ik.solve(side, data, position + offset, rotation, transport_goal)
+                        transport_goal[ids] += np.clip(angles - transport_goal[ids], -.055, .055)
                 world_velocity = np.clip(2.5 * error, [-.40, -.18], [.18, .18])
+                if native_start and error[0] < -.12:
+                    # Favor forward steps on the approach, then align laterally near the basket.
+                    world_velocity[:] = [-.45, np.clip(error[1], -.08, .08)]
                 if error[0] < -.045:
                     world_velocity[0] = min(world_velocity[0], -.12)
             else:
                 world_velocity = [-.19, 0.] if data.qpos[0] > edge - .38 else [0., 0.]
             local_velocity = heading[:2, :2].T @ world_velocity
-            advance('carry', joint_goal, [*local_velocity, 1., -np.pi], None, carry_height)
+            advance('carry', transport_goal, [*local_velocity, 1., -np.pi], None, carry_height)
             lost = lost + 1 if not any('hand' in body or 'wrist' in body for body in loads) else 0
             if ended or lost >= 10:
                 print('Carry stopped after contact loss or episode termination.', flush=True)
@@ -486,8 +499,7 @@ def main():
             return
 
         heading = yaw_rotation(data.qpos)
-        origins = ik.wrist_poses(data, joint_goal)
-        joint_goal = joint_goal.copy()
+        origins = ik.wrist_poses(data, transport_goal)
         release_steps = 36
         for step in range(trial['max_steps']):
             progress = min(1., (step + 1) / release_steps)
@@ -498,9 +510,9 @@ def main():
                 retreat = .05 * max(0., (smooth - .4) / .6)
                 goal = p + heading @ [-retreat, sign * .09 * smooth, .02 * smooth]
                 targets.append(goal.tolist())
-                indices, q = ik.solve(side, data, goal, r, joint_goal)
-                joint_goal[indices] += np.clip(q - joint_goal[indices], -.055, .055)
-            advance('release' if step < release_steps else 'settle', joint_goal,
+                indices, q = ik.solve(side, data, goal, r, transport_goal)
+                transport_goal[indices] += np.clip(q - transport_goal[indices], -.055, .055)
+            advance('release' if step < release_steps else 'settle', transport_goal,
                     [0., 0., 0., -np.pi], targets, carry_height)
             if ended or placed_in_container(rows, container_name):
                 return
