@@ -193,11 +193,18 @@ def main():
     early_contacts = set()
     substep_contacts = set()
     sonic = None
+    sonic_action = None
+    physics_deadline = 0.
 
     def observe_substep():
+        nonlocal physics_deadline
         substep_contacts.update(robot_bodies.intersection(forces_on_target(model, data, target)))
         if sonic is not None:
             sonic.cache_state()
+            # Pace each physics sample like the native teleop simulator.
+            physics_deadline += config['SIMULATE_DT']
+            time.sleep(max(0., physics_deadline - time.monotonic()))
+            sonic.refresh_action(sonic_action)
 
     raw.substep_callback = observe_substep
     for _ in range(300):
@@ -258,7 +265,7 @@ def main():
                                      if model.jnt_qposadr[i] in ik.arms[side][1]]) for side in SIDES}
 
     def advance(stage, joint_goal, navigation, wrist_targets, base_height=.74):
-        nonlocal obs, loads, ended, official_success_step
+        nonlocal obs, loads, ended, official_success_step, sonic_action, physics_deadline
         now = time.monotonic()
         if sonic is not None:
             commands = dict(target_q=robot_model.get_body_actuated_joints(joint_goal),
@@ -266,8 +273,9 @@ def main():
                             right_hand_q=robot_model.get_hand_actuated_joints(joint_goal, side='right'))
             rotation = yaw_rotation(data.qpos)
             heading = float(np.arctan2(rotation[1, 0], rotation[0, 0]))
-            action = sonic.action(commands['target_q'], commands['left_hand_q'],
-                                  commands['right_hand_q'], navigation, base_height, heading)
+            action = sonic_action = sonic.action(commands['target_q'], commands['left_hand_q'],
+                                                 commands['right_hand_q'], navigation, base_height, heading)
+            physics_deadline = max(now - .005, physics_deadline)
         else:
             policy.set_observation(agent._build_wbc_observation(raw.task.robot.prepare_obs()))
             policy.set_goal({'target_upper_body_pose': joint_goal[upper], 'navigate_cmd': navigation,

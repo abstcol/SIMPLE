@@ -118,5 +118,11 @@ class SonicReference:
         if self.process.poll() is not None:
             raise RuntimeError('SONIC exited. See sonic-controller.log.')
         self.publisher.send(planner_packet(body, left, right, navigation, height, heading))
-        return ActionCmd('wbc_torque', low_cmd=self.bridge.low_cmd, use_sensor=self.bridge.use_sensor,
-                         left_hand_cmd=self.bridge.left_hand_cmd, right_hand_cmd=self.bridge.right_hand_cmd)
+        action = ActionCmd('wbc_torque', use_sensor=self.bridge.use_sensor)
+        self.refresh_action(action)
+        return action
+
+    def refresh_action(self, action):
+        action.parameters.update(low_cmd=self.bridge.low_cmd,
+                                 left_hand_cmd=self.bridge.left_hand_cmd,
+                                 right_hand_cmd=self.bridge.right_hand_cmd)
