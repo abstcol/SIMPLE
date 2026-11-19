@@ -209,6 +209,10 @@ def main():
     raw.mujoco.renderers = dict.fromkeys(camera_names)
     agent = SonicDecoupledWbcAgent(raw.task.robot, config)
     agent.reset()
+    native_start = args.controller == 'sonic-split'
+    robot = raw.task.robot
+    band = robot.elastic_band if native_start else None
+    band_action = ActionCmd('elastic_band')
     policy = agent._wbc_policy
     policy.lower_body_policy.use_policy_action = True
     dt = 4 * config['SIMULATE_DT']
@@ -230,21 +234,27 @@ def main():
         nonlocal physics_deadline
         substep_contacts.update(robot_bodies.intersection(forces_on_target(model, data, target)))
         if sonic is not None:
-            sonic.cache_state()
+            if native_start:
+                if band.enable:
+                    robot.apply_action(band_action)
+                sonic.publish_state()
+            else:
+                sonic.cache_state()
             # Pace each physics sample like the native teleop simulator.
             physics_deadline += config['SIMULATE_DT']
             time.sleep(max(0., physics_deadline - time.monotonic()))
             sonic.refresh_action(sonic_action)
 
     raw.substep_callback = observe_substep
-    for _ in range(300):
-        if raw.task.robot.stabilized:
-            break
-        start = time.monotonic()
-        obs, *_ = raw.step(agent.get_stabilize_action(obs))
-        raw.update_reward()
-        early_contacts.update(substep_contacts)
-        time.sleep(max(0, dt - (time.monotonic() - start)))
+    if not native_start:
+        for _ in range(300):
+            if robot.stabilized:
+                break
+            start = time.monotonic()
+            obs, *_ = raw.step(agent.get_stabilize_action(obs))
+            raw.update_reward()
+            early_contacts.update(substep_contacts)
+            time.sleep(max(0, dt - (time.monotonic() - start)))
     policy.lower_body_policy.gait_indices = torch.zeros((1,), dtype=torch.float32)
 
     robot_model = agent._dwbc_robot_model
@@ -254,6 +264,14 @@ def main():
     lower_mask = np.zeros(robot_model.num_dofs, dtype=bool)
     lower_mask[robot_model.get_joint_group_indices('lower_body')] = True
     lower_motors = np.flatnonzero(robot_model.get_body_actuated_joints(lower_mask))
+    if native_start:
+        # Use the native reset joint positions and suspend the pelvis above its spawn.
+        lower_qpos = model.jnt_qposadr[robot.body_joint_index[lower_motors]]
+        data.qpos[lower_qpos] = model.qpos0[lower_qpos]
+        band.point[:] = [*data.qpos[:2], data.geom(ground).xpos[2] + 1.]
+        data.qpos[2] = band.point[2]
+        data.qpos[3:7] = Rotation.from_matrix(yaw_rotation(data.qpos)).as_quat(scalar_first=True)
+        mujoco.mj_forward(model, data)
     full_goal = robot_model.get_configuration_from_actuated_joints(
         body_actuated_joint_values=raw.task.robot.prepare_obs()['body_q'],
         left_hand_actuated_joint_values=np.zeros(7), right_hand_actuated_joint_values=np.zeros(7))
@@ -281,11 +299,12 @@ def main():
     model.vis.global_.offwidth = max(640, model.vis.global_.offwidth)
     model.vis.global_.offheight = max(480, model.vis.global_.offheight)
     camera = mujoco.MjvCamera()
-    camera.distance, camera.azimuth, camera.elevation = 2.5, 132, -22
+    camera.distance, camera.azimuth, camera.elevation = 2.5, 40 if native_start else 132, -22
     camera.lookat[:] = [edge - .08, y, .66]
     rows, frames = [], []
     ended = False
     handover_pass = None
+    standing_pass = wrist_clearance_pass = None
     official_success_step = None
     previous_goals = None
     lift_progress = 0
@@ -302,7 +321,7 @@ def main():
         nonlocal obs, loads, ended, official_success_step, sonic_action, physics_deadline
         now = time.monotonic()
         q = joint_goal
-        split = sonic is not None and args.controller == 'sonic-split'
+        split = native_start
         if sonic is None or split:
             policy.set_observation(agent._build_wbc_observation(raw.task.robot.prepare_obs()))
             policy.set_goal({'target_upper_body_pose': joint_goal[upper], 'navigate_cmd': navigation,
@@ -329,18 +348,23 @@ def main():
                                                  split_action=action if split else None)
             physics_deadline = max(now - .005, physics_deadline)
         substep_contacts.clear()
+        if band is not None and band.enable:
+            robot.apply_action(band_action)
         obs, reward, terminated, truncated, info = env.step(action)
         loads = forces_on_target(model, data, target)
         state = {'stage': stage, 'step': len(rows) + 1, 'target': info['target'].tolist(),
                  'container': info['container'].tolist(), 'official_success': bool(terminated),
                  'pelvis': data.qpos[:7].tolist(), 'reward': float(reward),
                  'wrists': [data.body(ik.arms[s][0]).xpos.tolist() for s in SIDES],
-                 'wrist_targets': wrist_targets, 'navigate_cmd': list(navigation), 'base_height_command': base_height,
+                 'wrist_targets': wrist_targets, 'navigate_cmd': list(navigation),
+                 'base_height_command': -1. if split else base_height,
                  'target_contact_bodies': sorted(loads), 'target_contact_forces_n': loads,
                  'commands': commands, 'lift_progress': lift_progress,
                  'robot_contacts_over_tick': sorted(substep_contacts),
                  'foot_support': foot_support(model, data, ground, feet),
                  'object_displacement_m': data.body(target).xpos - spawn_box}
+        if band is not None:
+            state['band_support_n'] = float(data.xfrc_applied[robot.band_attached_link, 2])
         if sonic is not None:
             state['sonic_motor_target_q'] = [float(m.q) for m in action['low_cmd'].motor_cmd[:29]]
         rows.append(state)
@@ -353,6 +377,42 @@ def main():
         ended = (terminated and not args.carry) or truncated or data.qpos[2] < .45
         time.sleep(max(0, dt - (time.monotonic() - now)))
         return state
+
+    def box_was_disturbed():
+        early_contacts.update(substep_contacts)
+        return bool(early_contacts) or np.linalg.norm(data.body(target).xpos - spawn_box) > .01
+
+    def stand_with_sonic(resources):
+        nonlocal sonic
+        from sonic_reference import SonicReference
+
+        facing = yaw_rotation(data.qpos)
+        yaw = float(np.arctan2(facing[1, 0], facing[0, 0]))
+        idle = [0., 0., 0., yaw]
+        sonic = resources.enter_context(SonicReference(robot, config, args.output))
+        sonic.engage(yaw, navigation_only=True)
+        sonic.stop_heartbeat()
+
+        # Replicate the successful native flat-ground startup: lower 20 cm in
+        # 3.5 seconds, let the feet take load, then release at 5 seconds.
+        for step in range(round(5. / dt)):
+            band.length = -.20 * min(1., (step + 1) * dt / 3.5)
+            advance('crane', full_goal, idle, None)
+            if ended or box_was_disturbed():
+                return False
+        band.enable = False
+        data.xfrc_applied[robot.band_attached_link] = 0.
+        for step in range(round(4. / dt)):
+            advance('stand', full_goal, idle, None)
+            if ended or box_was_disturbed():
+                break
+            if step >= 24:
+                window = rows[-25:]
+                poses = np.array([row['pelvis'][:3] for row in window])
+                if (poses[:, 2].min() > .65 and np.linalg.norm(np.ptp(poses, axis=0)) < .04
+                        and all(len(row['foot_support']) == 2 for row in window)):
+                    return True
+        return False
 
     def carry_to_container(joint_goal):
         box = data.body(target)
@@ -408,6 +468,11 @@ def main():
         with ExitStack() as resources:
             if early_contacts or np.linalg.norm(initial - spawn_box) > .01:
                 raise RuntimeError(f'Stabilization disturbed the box: {sorted(early_contacts)}')
+            if native_start:
+                standing_pass = stand_with_sonic(resources)
+                print('SONIC unassisted standing', standing_pass, 'contacts', sorted(early_contacts), flush=True)
+                if not standing_pass:
+                    return
             for name, steps, goals in stages:
                 origins = [(data.body(ik.arms[side][0]).xpos.copy(),
                             data.body(ik.arms[side][0]).xmat.reshape(3, 3).copy()) for side in SIDES]
@@ -463,7 +528,16 @@ def main():
                     if early_contacts or np.linalg.norm(data.body(target).xpos - spawn_box) > .01:
                         print('Early robot contact or box motion before approach.', flush=True)
                         break
-                if args.controller != 'gr00t' and name == 'clear_box' and not ended:
+                if native_start and name == 'clear_box':
+                    window = stage_rows[-25:]
+                    errors = np.linalg.norm(np.array([row['wrists'] for row in window])
+                                            - np.array([position for position, _ in goals]), axis=2)
+                    wrist_clearance_pass = not ended and len(window) == 25 and errors.max() <= .06
+                    print('SONIC wrist clearance', wrist_clearance_pass,
+                          'max error (m)', errors.max(), flush=True)
+                    if not wrist_clearance_pass:
+                        break
+                if args.controller == 'sonic' and name == 'clear_box' and not ended:
                     from sonic_reference import SonicReference
                     sonic = resources.enter_context(SonicReference(raw.task.robot, config, args.output))
                     heading = yaw_rotation(data.qpos)
@@ -503,7 +577,9 @@ def main():
         print('initial', initial.tolist(), 'table edge/top', [edge, top], flush=True)
         result = {'trial_id':trial['trial_id'], 'approach':'tracking-cradle',
                   'target_mass_kg':float(model.body_mass[target]),
-                  'controller': args.controller, 'startup_wbc': 'gr00t', 'handover_pass': handover_pass,
+                  'controller': args.controller, 'startup_wbc': 'sonic' if native_start else 'gr00t',
+                  'handover_pass': handover_pass, 'standing_pass': standing_pass,
+                  'wrist_clearance_pass': wrist_clearance_pass,
                   'sonic_joints': [raw.task.robot.joint_names[i] for i in lower_motors]
                   if args.controller == 'sonic-split' else None,
                   'early_robot_contacts': sorted(early_contacts),

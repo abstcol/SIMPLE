@@ -62,15 +62,14 @@ verified scene and experiment evidence.
 
 ### Native SONIC standing lift
 
-Both runs use GR00T to stabilize the robot and move its wrists to the
-original clearance pose. The SONIC run then hands over execution, using
-the same wrist IK and contact feedback to send upper-body joint, hand and
-navigation references to SONIC's native planner.
+Use `--controller sonic-split` to start with SONIC driving the legs and waist.
+The elastic band lowers the robot for five simulated seconds before release.
+Once both feet support the robot, the original wrist IK, arm and finger PD, and
+contact feedback handle clearance and lift. SONIC receives the full robot state
+on each physics step and uses navigation commands with its default height.
 
-Use `--controller sonic-split` to compare locomotion controllers while keeping
-the reference arm and finger PD. SONIC receives the full robot state and planner
-references. Only the motors in the GR00T lower-body group (legs and waist) use
-the SONIC command.
+Use `--controller sonic` to test the previous control handover after GR00T
+stabilization and wrist clearance.
 
 Use the [project simulator environment](isaac-blackwell.md#local-activation-and-paths)
 with PyZMQ and the [native SONIC models](https://nvlabs.github.io/GR00T-WholeBodyControl/getting_started/download_models.html).
@@ -84,7 +83,7 @@ MUJOCO_GL=egl python scripts/reproduction/run_reference_carry.py \
   --manifest PATH --trial episode_000_seed_0_mass_1 --controller sonic-split --output NEW_DIR
 ```
 
-Use the default controller to run the paired GR00T control. Both runs record
+Use the default controller to run the GR00T reference. Both runs record
 early contacts, wrist tracking, forces on the box and its displacement, and
 the tangential velocity and load at foot-ground contacts. The
 lift check requires the box to stay at least 5 cm above the initial height

@@ -27,7 +27,7 @@ def planner_packet(body, left, right, navigation, height, heading):
     yaw = navigation[3]
     return build_planner_message(
         1 if speed else 0, (*movement, 0.), (np.cos(yaw), np.sin(yaw), 0.),
-        speed=speed or -1., height=height, upper_body_position=body[UPPER_BODY],
+        speed=speed or -1., height=height, upper_body_position=None if body is None else body[UPPER_BODY],
         left_hand_position=left, right_hand_position=right,
     )
 
@@ -65,17 +65,16 @@ class SonicReference:
                    '--logs-dir', str((self.output / 'sonic-controller').resolve())]
             self.process = subprocess.Popen(cmd, cwd=deploy, stdout=log, stderr=subprocess.STDOUT)
             stack.callback(self.stop_controller)
-            stop = threading.Event()
+            self.heartbeat_stop = threading.Event()
 
             def heartbeat():
-                while not stop.is_set():
+                while not self.heartbeat_stop.is_set():
                     self.bridge.PublishLowState(self.state)
-                    stop.wait(.005)
+                    self.heartbeat_stop.wait(.005)
 
-            thread = threading.Thread(target=heartbeat, daemon=True)
-            thread.start()
-            stack.callback(thread.join)
-            stack.callback(stop.set)
+            self.heartbeat = threading.Thread(target=heartbeat, daemon=True)
+            self.heartbeat.start()
+            stack.callback(self.stop_heartbeat)
             return self
         except BaseException:
             stack.close()
@@ -96,10 +95,19 @@ class SonicReference:
         self.state = {key: value.copy() if isinstance(value, np.ndarray) else value
                       for key, value in self.robot.prepare_obs().items()}
 
-    def engage(self, heading):
+    def stop_heartbeat(self):
+        self.heartbeat_stop.set()
+        self.heartbeat.join()
+
+    def publish_state(self):
+        self.bridge.PublishLowState(self.robot.prepare_obs())
+
+    def engage(self, heading, navigation_only=False):
         state = self.state
-        hold = planner_packet(state['body_q'], state['left_hand_q'], state['right_hand_q'],
-                              (0., 0., 0., heading), .74, heading)
+        body, left, right = (None, None, None) if navigation_only else (
+            state['body_q'], state['left_hand_q'], state['right_hand_q'])
+        hold = planner_packet(body, left, right, (0., 0., 0., heading),
+                              -1. if navigation_only else .74, heading)
         start = build_command_message(start=True, stop=False, planner=True)
         deadline = time.monotonic() + 240
         planner_ready = False
@@ -117,6 +125,9 @@ class SonicReference:
     def action(self, body, left, right, navigation, height, heading, split_action=None):
         if self.process.poll() is not None:
             raise RuntimeError('SONIC exited. See sonic-controller.log.')
+        if split_action is not None:
+            body = left = right = None
+            height = -1.
         self.publisher.send(planner_packet(body, left, right, navigation, height, heading))
         action = split_action if split_action is not None else ActionCmd('wbc_torque')
         action.parameters['use_sensor'] = self.bridge.use_sensor
