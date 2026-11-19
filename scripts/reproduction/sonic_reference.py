@@ -102,13 +102,16 @@ class SonicReference:
                               (0., 0., 0., heading), .74, heading)
         start = build_command_message(start=True, stop=False, planner=True)
         deadline = time.monotonic() + 240
-        while self.process.poll() is None and time.monotonic() < deadline:
-            self.publisher.send(start)
-            self.publisher.send(hold)
-            tick = self.debug.get_synced()
-            if tick is not None and np.linalg.norm(tick['token']) > 0:
-                return
-            time.sleep(.025)
+        planner_ready = False
+        with (self.output / 'sonic-controller.log').open(errors='replace') as log:
+            while self.process.poll() is None and time.monotonic() < deadline:
+                self.publisher.send(start)
+                self.publisher.send(hold)
+                planner_ready |= 'motion name is planner_motion' in log.read()
+                tick = self.debug.get_synced()
+                if planner_ready and tick is not None and np.linalg.norm(tick['token']) > 0:
+                    return
+                time.sleep(.025)
         raise RuntimeError('SONIC did not engage. See sonic-controller.log.')
 
     def action(self, body, left, right, navigation, height, heading):

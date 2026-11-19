@@ -174,6 +174,11 @@ def main():
     assert math.isclose(effective_threshold(raw.task, TASK), trial['success_criteria'])
     obs, _ = env.reset(seed=trial['sim_seed'],
                        options={'state_dict': decode_environment_config(trial['environment_config'])})
+    # The scripted expert only needs physics state. Render saved frames after
+    # the run so the two real-time controllers see the same recording overhead.
+    camera_names = tuple(raw.mujoco.renderers)
+    raw.mujoco.close()
+    raw.mujoco.renderers = dict.fromkeys(camera_names)
     agent = SonicDecoupledWbcAgent(raw.task.robot, config)
     agent.reset()
     policy = agent._wbc_policy
@@ -234,11 +239,10 @@ def main():
               ('preload', 80, cupped), ('lift', 200, raised), ('hold', 60, raised)]
     model.vis.global_.offwidth = max(640, model.vis.global_.offwidth)
     model.vis.global_.offheight = max(480, model.vis.global_.offheight)
-    renderer = mujoco.Renderer(model, height=480, width=640)
     camera = mujoco.MjvCamera()
     camera.distance, camera.azimuth, camera.elevation = 2.5, 132, -22
     camera.lookat[:] = [edge - .08, y, .66]
-    rows = []
+    rows, frames = [], []
     ended = False
     official_success_step = None
     previous_goals = None
@@ -252,7 +256,7 @@ def main():
     position_gains = {side: np.array([arm_kp[model.joint(i).name] for i in range(model.njnt)
                                      if model.jnt_qposadr[i] in ik.arms[side][1]]) for side in SIDES}
 
-    def advance(stage, joint_goal, navigation, wrist_targets, video, base_height=.74):
+    def advance(stage, joint_goal, navigation, wrist_targets, base_height=.74):
         nonlocal obs, loads, ended, official_success_step
         now = time.monotonic()
         if sonic is not None:
@@ -289,10 +293,7 @@ def main():
                  'object_displacement_m': data.body(target).xpos - spawn_box}
         rows.append(state)
         if len(rows) % 2 == 0:
-            if stage in ('carry', 'release', 'settle'):
-                camera.lookat[:] = [data.qpos[0], data.qpos[1], .68]
-            renderer.update_scene(data, camera=camera)
-            video.append_data(renderer.render())
+            frames.append((stage, data.qpos.copy()))
         if terminated and official_success_step is None:
             official_success_step = len(rows)
         # Continue a diagnostic placement if the score fires on basket contact.
@@ -301,7 +302,7 @@ def main():
         time.sleep(max(0, dt - (time.monotonic() - now)))
         return state
 
-    def carry_to_container(joint_goal, video):
+    def carry_to_container(joint_goal):
         box = data.body(target)
         basket = data.body(container)
         carry_height = .74
@@ -347,13 +348,12 @@ def main():
                 indices, q = ik.solve(side, data, goal, r, joint_goal)
                 joint_goal[indices] += np.clip(q - joint_goal[indices], -.055, .055)
             advance('release' if step < release_steps else 'settle', joint_goal,
-                    [0., 0., 0., -np.pi], targets, video, carry_height)
+                    [0., 0., 0., -np.pi], targets, carry_height)
             if ended or placed_in_container(rows, container_name):
                 return
 
     try:
         with ExitStack() as resources:
-            video = resources.enter_context(imageio.get_writer(args.output / 'overview.mp4', fps=25, codec='libx264'))
             if early_contacts or np.linalg.norm(initial - spawn_box) > .01:
                 raise RuntimeError(f'Stabilization disturbed the box: {sorted(early_contacts)}')
             if args.controller == 'sonic':
@@ -361,6 +361,20 @@ def main():
                 sonic = resources.enter_context(SonicReference(raw.task.robot, config, args.output))
                 heading = yaw_rotation(data.qpos)
                 sonic.engage(float(np.arctan2(heading[1, 0], heading[0, 0])))
+                for _ in range(40):
+                    advance('handover', full_goal, [0., 0., 0., 0.], [])
+                    early_contacts.update(substep_contacts)
+                    if ended or early_contacts or np.linalg.norm(data.body(target).xpos - spawn_box) > .01:
+                        break
+                travel = np.ptp(np.array([row['pelvis'][:3] for row in rows[-20:]]), axis=0)
+                handover_pass = (len(rows) == 40 and not early_contacts and not ended
+                                 and np.linalg.norm(data.body(target).xpos - spawn_box) <= .01
+                                 and min(row['pelvis'][2] for row in rows[-20:]) > .65
+                                 and np.linalg.norm(travel) < .04)
+                print('SONIC handover', bool(handover_pass), 'base motion', travel.tolist(),
+                      'contacts', sorted(early_contacts), flush=True)
+                if not handover_pass:
+                    return
             for name, steps, goals in stages:
                 origins = [(data.body(ik.arms[side][0]).xpos.copy(),
                             data.body(ik.arms[side][0]).xmat.reshape(3, 3).copy()) for side in SIDES]
@@ -403,7 +417,7 @@ def main():
                         for side, sign in zip(SIDES, (1, -1)):
                             ik.press(side, data, joint_goal, np.array([forward_bias, -sign * 16. * ramp, lift]),
                                      position_gains[side])
-                    state = advance(name, joint_goal, [vx, 0., 0., 0.], commanded_wrists, video)
+                    state = advance(name, joint_goal, [vx, 0., 0., 0.], commanded_wrists)
                     stage_rows.append(state)
                     if ended:
                         break
@@ -423,10 +437,8 @@ def main():
                     break
             if args.carry and not ended and held_above_table(rows, z):
                 print('Lift passed. Starting transport and placement.', flush=True)
-                carry_to_container(joint_goal, video)
+                carry_to_container(joint_goal)
     finally:
-        renderer.close()
-        env.close()
         write_json(args.output / 'trajectory.json', rows)
         write_json(args.output / 'trial.json', trial)
         z_values = [row['target'][2] for row in rows]
@@ -445,6 +457,19 @@ def main():
                   'robot_stabilized':bool(raw.task.robot.stabilized)}
         write_json(args.output / 'result.json', result)
         print(json.dumps(result, default=lambda value: value.item()), flush=True)
+        if frames:
+            with mujoco.Renderer(model, height=480, width=640) as renderer, imageio.get_writer(
+                args.output / 'overview.mp4', fps=25, codec='libx264'
+            ) as video:
+                for stage, qpos in frames:
+                    data.qpos[:] = qpos
+                    mujoco.mj_forward(model, data)
+                    if stage in ('carry', 'release', 'settle'):
+                        camera.lookat[:] = [qpos[0], qpos[1], .68]
+                    renderer.update_scene(data, camera=camera)
+                    video.append_data(renderer.render())
+        raw.mujoco.renderers.clear()
+        env.close()
 
 
 if __name__ == '__main__':
