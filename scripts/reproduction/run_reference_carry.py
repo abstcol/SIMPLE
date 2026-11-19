@@ -229,14 +229,19 @@ def main():
     sonic = None
     sonic_action = None
     physics_deadline = 0.
+    band_scale = 1.
+
+    def apply_band():
+        if band is not None and band.enable:
+            robot.apply_action(band_action)
+            data.xfrc_applied[robot.band_attached_link] *= band_scale
 
     def observe_substep():
         nonlocal physics_deadline
         substep_contacts.update(robot_bodies.intersection(forces_on_target(model, data, target)))
         if sonic is not None:
             if native_start:
-                if band.enable:
-                    robot.apply_action(band_action)
+                apply_band()
                 sonic.publish_state()
             else:
                 sonic.cache_state()
@@ -357,8 +362,7 @@ def main():
                                                  split_action=action if split else None)
             physics_deadline = max(now - .005, physics_deadline)
         substep_contacts.clear()
-        if band is not None and band.enable:
-            robot.apply_action(band_action)
+        apply_band()
         step_env = raw if stage in ('crane', 'stand') else env
         obs, reward, terminated, truncated, info = step_env.step(action)
         loads = forces_on_target(model, data, target)
@@ -393,7 +397,7 @@ def main():
         return bool(early_contacts) or np.linalg.norm(data.body(target).xpos - spawn_box) > .01
 
     def stand_with_sonic(resources):
-        nonlocal sonic
+        nonlocal sonic, band_scale
         from sonic_reference import SonicReference
 
         facing = yaw_rotation(data.qpos)
@@ -403,10 +407,29 @@ def main():
         sonic.engage(yaw, navigation_only=True)
         sonic.stop_heartbeat()
 
-        # Replicate the successful native flat-ground startup: lower 20 cm in
-        # 3.5 seconds, let the feet take load, then release at 5 seconds.
-        for step in range(round(5. / dt)):
-            band.length = -.20 * min(1., (step + 1) * dt / 3.5)
+        # Follow the native band descent, then wait for the feet to bear the
+        # weight before removing its vertical and lateral support.
+        weight = -model.opt.gravity[2] * model.body_subtreemass[pelvis]
+        loaded = 0
+        for step in range(round(9. / dt)):
+            if step * dt < 3.5:
+                band.length = -.20 * min(1., (step + 1) * dt / 3.5)
+            elif not loaded:
+                band.length = max(-.32, band.length - .035 * dt)
+            state = advance('crane', full_goal, idle, None)
+            if ended or box_was_disturbed():
+                return False
+            foot_loads = [foot['normal_n'] for foot in state['foot_support'].values()]
+            supported = (len(foot_loads) == 2 and min(foot_loads) >= .15 * weight
+                         and sum(foot_loads) >= .75 * weight and state['band_support_n'] <= .25 * weight)
+            loaded = loaded + 1 if supported else 0
+            if loaded >= 15:
+                break
+        else:
+            print('Both feet did not take load before crane release.', flush=True)
+            return False
+        for step in range(50):
+            band_scale = 1. - (step + 1) / 50
             advance('crane', full_goal, idle, None)
             if ended or box_was_disturbed():
                 return False
