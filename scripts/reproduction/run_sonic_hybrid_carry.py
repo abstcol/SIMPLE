@@ -25,18 +25,17 @@ from pi05_common import decode_environment_config, validate_manifest, write_json
 from run_reference_carry import SIDES, TASK, forces_on_target, wrist_goal
 
 FPS = 50
-IDLE, SLOW_WALK = 0, 1
+IDLE = 0
 NEUTRAL_HEAD = [0., 0., .40]
 # SONIC's virtual wrist tracking points are offset from wrist_yaw_link.
 WRIST_OFFSETS = ([.18, -.025, 0.], [.18, .025, 0.])
 
 
-def planner_packet(base, wrists, movement, speed, facing, hands):
+def planner_packet(base, wrists, hands):
     """Convert world-frame wrist-link targets to the native three-point input."""
     fingers = dict(left_hand_position=hands[0], right_hand_position=hands[1])
-    mode = SLOW_WALK if speed else IDLE
     if wrists is None:
-        return build_planner_message(mode, movement, facing, speed=speed or -1., **fingers)
+        return build_planner_message(IDLE, (0., 0., 0.), (1., 0., 0.), **fingers)
     to_local = Rotation.from_quat(base[3:7], scalar_first=True).inv()
     positions, orientations = [], []
     for (position, rotation), offset in zip(wrists, WRIST_OFFSETS):
@@ -46,8 +45,7 @@ def planner_packet(base, wrists, movement, speed, facing, hands):
         positions.extend(point)
         orientations.extend((to_local * rotation).as_quat(scalar_first=True))
     return build_planner_message(
-        mode, movement, facing,
-        speed=speed if speed else -1.,
+        IDLE, (0., 0., 0.), (1., 0., 0.),
         **fingers,
         vr_3pt_position=positions + NEUTRAL_HEAD,
         vr_3pt_orientation=orientations + [1., 0., 0., 0.],
@@ -147,7 +145,10 @@ def run(args, trial):
     model.vis.global_.offheight = max(480, model.vis.global_.offheight)
     rows, frames = [], []
     contact_impulse = {}
-    facing = (1., 0., 0.)
+    pelvis = model.body('pelvis').id
+    robot_bodies = {model.body(i).name for i in range(model.nbody)
+                    if model.body_rootid[i] == pelvis}
+    gates = {'startup': False, 'wrists': False}
     heartbeat_stop = threading.Event()
     heartbeat = threading.Thread(target=publish_state, daemon=True)
     startup_support = 1.
@@ -211,28 +212,21 @@ def run(args, trial):
             proprio = robot_state()
             for _ in range(5):
                 pub.send(build_command_message(start=True, stop=False, planner=True))
-                pub.send(planner_packet(data.qpos[:7], None, (0., 0., 0.), 0., facing, closed_hands))
+                pub.send(planner_packet(data.qpos[:7], None, closed_hands))
                 time.sleep(.02)
             heartbeat_stop.set()
             heartbeat.join()
             last_goals = current_wrists()
 
-            def tick(phase, goals, stage_base=None):
+            def tick(phase, goals):
                 nonlocal next_substep, last_goals
                 if goals is not None:
                     last_goals = goals
                 next_substep = time.monotonic()
                 if controller.poll() is not None:
                     raise RuntimeError('SONIC exited. See controller.log.')
-                movement, speed = (0., 0., 0.), 0.
-                if stage_base is not None:
-                    error = stage_base - data.qpos[:2]
-                    distance = np.linalg.norm(error)
-                    if distance > .035:
-                        movement = (*list(error / distance), 0.)
-                        speed = float(np.clip(1.5 * distance, .10, .19))
-                hands = closed_hands if phase in ('startup', 'release_crane', 'settle', 'position', 'clear') else open_hands
-                pub.send(planner_packet(data.qpos[:7], goals, movement, speed, facing, hands))
+                hands = closed_hands if phase in ('startup', 'release_crane', 'settle', 'clear', 'ready') else open_hands
+                pub.send(planner_packet(data.qpos[:7], goals, hands))
                 contact_impulse.clear()
                 action.parameters.update(low_cmd=bridge.low_cmd, left_hand_cmd=bridge.left_hand_cmd,
                                          right_hand_cmd=bridge.right_hand_cmd)
@@ -243,11 +237,11 @@ def run(args, trial):
                                  displacement_m=(pos - initial).tolist(),
                                  pelvis_xyz_m=data.qpos[:3].tolist(),
                                  pelvis_quat_wxyz=data.qpos[3:7].tolist(),
-                                 navigation_speed_mps=speed,
                                  standing=bool(data.qpos[2] > .54),
                                  task_success=bool(terminated),
                                  contacts_n={key: force.tolist() for key, force in contacts.items()},
                                  contact_impulse_ns={key: impulse.tolist() for key, impulse in contact_impulse.items()},
+                                 robot_contacts=sorted(robot_bodies.intersection(contact_impulse)),
                                  wrists_xyz_m=[p.tolist() for p, _ in current_wrists()],
                                  wrist_targets_m=[p.tolist() for p, _ in (goals or [])]))
                 if len(rows) % 2 == 0:
@@ -270,47 +264,64 @@ def run(args, trial):
                 print(phase, rows[-1]['displacement_m'], list(rows[-1]['contacts_n']), flush=True)
                 return rows[-1]['standing']
 
-            # Lower to the stock standing height and release before manipulating.
+            def quiet(window):
+                poses = np.array([row['pelvis_xyz_m'] for row in window])
+                return (len(poses) >= 20 and poses[:, 2].min() >= .70
+                        and np.linalg.norm(np.ptp(poses, axis=0)) <= .035)
+
+            def clean_scene():
+                return all(not row['robot_contacts'] and np.linalg.norm(row['displacement_m']) <= .01
+                           for row in rows)
+
+            # Hold both wrists back while the existing crane lowers the robot.
+            # The references follow the base during this setup, without chasing world targets.
+            base_rot = Rotation.from_quat(data.qpos[3:7], scalar_first=True)
+            stowed = [(np.array([.045, sign * .19, -.085]), base_rot.inv() * rotation)
+                      for sign, (_, rotation) in zip((1, -1), current_wrists())]
+
+            def stowed_wrists():
+                base_rot = Rotation.from_quat(data.qpos[3:7], scalar_first=True)
+                return [(data.qpos[:3] + base_rot.apply(point), base_rot * rotation)
+                        for point, rotation in stowed]
+
             raw.substep_callback = pace_substep
             warmup_crane()
             for step in range(250):
                 robot.elastic_band.length = -.20 * min(1., step / 175)
-                tick('startup', None)
+                tick('startup', stowed_wrists())
             for step in range(75):
                 startup_support = 1. - (step + 1) / 75
-                tick('release_crane', None)
+                tick('release_crane', stowed_wrists())
             data.xfrc_applied[robot.band_attached_link] = 0.
-            for _ in range(90):
-                tick('settle', None)
+            for _ in range(100):
+                tick('settle', stowed_wrists())
                 if not rows[-1]['standing']:
                     break
-            # Finish all commanded stepping before adding upper-body targets.
-            stage_base = np.array([edge - .18, initial[1]])
-            for _ in range(95):
-                if not rows[-1]['standing'] or np.linalg.norm(stage_base - data.qpos[:2]) <= .035:
-                    break
-                tick('position', None, stage_base=stage_base)
-            for _ in range(50):
-                if not rows[-1]['standing']:
-                    break
-                tick('settle', None)
-            last_goals = current_wrists()
+            gates['startup'] = clean_scene() and quiet(rows[-25:])
+            print('startup', gates['startup'], flush=True)
             clearance = [(np.array([edge - .18, initial[1] + sign * .24, top + .31]),
                           Rotation.identity()) for sign in (1, -1)]
-            approach = [('clear', 65, clearance),
-                        ('approach', 95, cradle(.24, .29)),
-                        ('lower', 85, cradle(.22, .055)),
-                        ('cup', 95, cradle(.045, .046)),
-                        ('preload', 65, cradle(.033, .046))]
-            for phase, count, goals in approach:
-                if not rows[-1]['standing'] or np.linalg.norm(data.body(target).xpos - initial) > .04:
-                    break
-                if not move(phase, count, goals, follow_box=phase in ('cup', 'preload')):
-                    break
-            if rows[-1]['standing'] and rows[-1]['phase'] == 'preload':
-                lifted = cradle(.023, .175)
-                if move('lift', 125, lifted, follow_box=True):
-                    move('hold', 55, lifted, follow_box=True)
+            if gates['startup'] and move('clear', 80, clearance):
+                move('ready', 35, clearance)
+                window = rows[-20:]
+                gates['wrists'] = (clean_scene() and quiet(window)
+                                  and all(row['phase'] == 'ready'
+                                          and np.max(np.linalg.norm(
+                                              np.subtract(row['wrists_xyz_m'], row['wrist_targets_m']), axis=1)) <= .06
+                                          for row in window))
+            print('wrists', gates['wrists'], flush=True)
+            if gates['wrists'] and args.stage == 'lift':
+                approach = [('approach', 95, cradle(.24, .29)),
+                            ('lower', 85, cradle(.22, .055)),
+                            ('cup', 95, cradle(.045, .046)),
+                            ('preload', 65, cradle(.033, .046))]
+                for phase, count, goals in approach:
+                    if not move(phase, count, goals, follow_box=phase in ('cup', 'preload')):
+                        break
+                if rows[-1]['standing'] and rows[-1]['phase'] == 'preload':
+                    lifted = cradle(.023, .175)
+                    if move('lift', 125, lifted, follow_box=True):
+                        move('hold', 55, lifted, follow_box=True)
         finally:
             heartbeat_stop.set()
             heartbeat.join()
@@ -325,7 +336,7 @@ def run(args, trial):
                           target_mass_kg=float(model.body_mass[target]), initial_xyz_m=initial.tolist(),
                           max_lift_m=max(0., max((row['displacement_m'][2] for row in rows), default=0.)),
                           lift_and_hold_pass=lift_pass(rows), task_success=any(r['task_success'] for r in rows),
-                          steps=len(rows), hand_torque_limits_nm=limits.tolist())
+                          steps=len(rows), gates=gates, hand_torque_limits_nm=limits.tolist())
             write_json(args.output / 'result.json', result)
             if frames:
                 with mujoco.Renderer(model, height=480, width=640) as renderer, imageio.get_writer(
@@ -347,6 +358,7 @@ def main():
     parser.add_argument('--trial', required=True)
     parser.add_argument('--mass', type=float, choices=[1., 10.], required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--stage', choices=('ready', 'lift'), default='lift')
     parser.add_argument('--port', type=int, default=5596)
     parser.add_argument('--startup-timeout', type=float, default=600., help='Seconds allowed for cold engine startup.')
     parser.add_argument('--deploy', type=Path, default=Path('third_party/GR00T-WholeBodyControl/gear_sonic_deploy'))
