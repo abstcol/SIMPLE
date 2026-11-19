@@ -59,3 +59,35 @@ includes `overview.mp4`, `trajectory.json` and `result.json`, which records the
 first official success separately from hands-free placement. The
 [SIMPLE-Phys project plan](../../docs/projects/simple-phys-project.md) records the
 verified scene and experiment evidence.
+
+### Native SONIC standing lift
+
+Use `--controller sonic-split` to start with SONIC driving the legs and waist.
+The elastic band lowers the robot until its feet bear most of the weight, then
+tapers its support. After unassisted standing on both feet, the original wrist IK, arm and finger PD, and
+contact feedback handle clearance and lift. SONIC receives the full robot state
+and navigation together at each 20 ms simulation boundary, with its default
+height. The planner ticks every five control boundaries. MuJoCo advances four
+substeps only after matching body and hand acknowledgements arrive.
+The encoder uses the measured arm pose while keeping the planner's waist reference.
+
+Use `--controller sonic` to test the previous control handover after GR00T
+stabilization and wrist clearance.
+
+Use the [project simulator environment](isaac-blackwell.md#local-activation-and-paths)
+with PyZMQ and the [native SONIC models](https://nvlabs.github.io/GR00T-WholeBodyControl/getting_started/download_models.html).
+
+```bash
+export SONIC_TOOLS_DIR="$PWD/.tools/sonic" UV_CACHE_DIR="$PWD/.cache/uv"
+bash scripts/build_sonic_planner_lockstep.sh
+source "$SONIC_TOOLS_DIR/sonic_env.sh"
+
+MUJOCO_GL=egl python scripts/reproduction/run_reference_carry.py \
+  --manifest PATH --trial episode_000_seed_0_mass_1 --controller sonic-split --output NEW_DIR
+```
+
+Use the default controller to run the GR00T reference. Both runs record
+early contacts, wrist tracking, forces on the box and its displacement, and
+the tangential velocity and load at foot-ground contacts. The
+lift check requires the box to stay at least 5 cm above the initial height
+for 0.5 seconds with bilateral arm contact and no table contact.

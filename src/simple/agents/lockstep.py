@@ -89,7 +89,7 @@ class LockstepBarrier:
     def __init__(
         self,
         bridge: LockstepBridge,
-        send_token: TokenSender,
+        send_token: TokenSender | None,
         *,
         physics_dt: float,
         control_dt: float = 0.02,
@@ -268,6 +268,8 @@ class LockstepBarrier:
             next_action = NO_ACTION_SEQ
             token_array = None
         else:
+            if self._send_token is None:
+                raise LockstepProtocolError("token action requested without a token sender")
             next_action = self.action_seq + 1
             if next_action >= NO_ACTION_SEQ:
                 raise LockstepProtocolError("action sequence exhausted uint32 protocol space")
@@ -277,6 +279,7 @@ class LockstepBarrier:
 
         def publish() -> None:
             if token_array is not None:
+                assert self._send_token is not None
                 self._send_token(token_array, left_hand, right_hand, expected)
             self.bridge.publish_low_state(frozen, expected)
 

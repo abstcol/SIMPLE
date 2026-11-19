@@ -1,0 +1,138 @@
+--- a/gear_sonic_deploy/src/g1/g1_deploy_onnx_ref/src/g1_deploy_onnx_ref.cpp
++++ b/gear_sonic_deploy/src/g1/g1_deploy_onnx_ref/src/g1_deploy_onnx_ref.cpp
+@@ -252,6 +252,7 @@
+     // Flag to disable CRC checking for MuJoCo simulation
+     bool disable_crc_check_ = false;
+     bool sim_lockstep_ = false;
++    uint32_t last_lockstep_plan_step_ = 0;
+     
+     bool reinitialize_heading_ = true;
+     bool report_temperature_ = false;
+@@ -798,7 +799,7 @@
+             for (size_t i = 0; i < 29; i++) {
+               current_motion_joint_pos[i] = motion_joint_pos[i];
+             }
+-            for (size_t i = 0; i < 17; i++) {
++            for (size_t i = sim_lockstep_ && planner_ ? 3 : 0; i < 17; i++) {
+               current_motion_joint_pos[upper_body_joint_isaaclab_order_in_isaaclab_index[i]] = upper_body_joint_positions_buffer_[i];
+             }
+             std::copy(
+@@ -875,7 +876,7 @@
+               for (size_t i = 0; i < 29; i++) {
+                 current_motion_joint_vel[i] = motion_joint_vel[i];
+               }
+-              for (size_t i = 0; i < 17; i++) {
++              for (size_t i = sim_lockstep_ && planner_ ? 3 : 0; i < 17; i++) {
+                 current_motion_joint_vel[upper_body_joint_isaaclab_order_in_isaaclab_index[i]] = upper_body_joint_velocities_buffer_[i];
+               }
+               std::copy(
+@@ -2673,6 +2674,13 @@
+                 << " first_token=" << first_token_received_ << std::endl;
+       if (state_logger_) state_logger_->ResetHistoryKeepIndex();
+       if (input_interface_) input_interface_->ResetLockstepInput();
++      if (planner_) {
++        planner_->planner_state_ = {};
++        planner_motion_->timesteps = 0;
++        last_movement_state_ = MovementState();
++        replan_interval_counter_ = 0.0f;
++        last_lockstep_plan_step_ = 0;
++      }
+       {
+         std::lock_guard<std::mutex> lock(current_motion_mutex_);
+         current_frame_ = 0;
+@@ -2702,6 +2710,47 @@
+              bundle.token.size() == 64;
+     }
+ 
++    bool LockstepPlannerBoundary(const LockstepEnvelope& envelope) {
++      const auto state = low_state_buffer_.GetDataWithTime().data;
++      if (!state || state->reserve() != envelope.Reserve()) return false;
++
++      // NAV1, mode, movement[3], facing[3], speed and height. Piggyback on
++      // the unused remote bytes only in this loopback simulation mode, so
++      // retries and acknowledgement use exactly the same state and goal.
++      const auto& wire = state->wireless_remote();
++      uint32_t signature, mode;
++      std::array<float, 8> goal{};
++      std::memcpy(&signature, wire.data(), sizeof(signature));
++      std::memcpy(&mode, wire.data() + 4, sizeof(mode));
++      std::memcpy(goal.data(), wire.data() + 8, sizeof(goal));
++      if (signature != 0x3156414eU || mode > 1 ||
++          !std::all_of(goal.begin(), goal.end(), [](float value) { return std::isfinite(value); })) {
++        return false;
++      }
++
++      operator_state.start = true;
++      if (program_state_ != ProgramState::CONTROL) return true;
++      movement_state_buffer_.SetData(MovementState(
++          static_cast<int>(mode), {goal[0], goal[1], goal[2]},
++          {goal[3], goal[4], goal[5]}, goal[6], goal[7]));
++
++      // The native planner ticks at 10 Hz against the 50 Hz policy. Seed
++      // the first motion immediately, then keep the cadence in sim steps.
++      const bool first = !planner_->planner_state_.initialized;
++      const auto stride = static_cast<uint32_t>(std::lround(planner_dt_ / control_dt_));
++      if (first || envelope.sim_step - last_lockstep_plan_step_ >= stride) {
++        last_lockstep_plan_step_ = envelope.sim_step;
++        planner_->planner_state_.enabled = true;
++        Planner();
++        if (!planner_->planner_state_.initialized) return false;
++        std::cout << "[LockstepPlanner] session=" << envelope.session
++                  << " step=" << envelope.sim_step << " mode=" << mode << std::endl;
++      }
++      if (first && !CurrentFrameAdvancement()) return false;
++      operator_state.play = true;
++      return true;
++    }
++
+     void LockstepControlLoop(std::stop_token stop) {
+       while (!stop.stop_requested() && !operator_state.stop) {
+         auto work = lockstep_gate_.Wait(stop);
+@@ -2721,7 +2770,16 @@
+           continue;
+         }
+ 
+-        Input();
++        if (planner_) {
++          if (work->token.has_value() || !LockstepPlannerBoundary(work->envelope)) {
++            std::cerr << "[Lockstep ERROR] invalid simulation-clock planner boundary"
++                      << " step=" << work->envelope.sim_step << std::endl;
++            operator_state.stop = true;
++            break;
++          }
++        } else {
++          Input();
++        }
+         if (operator_state.stop) break;
+         if (work->token.has_value()) {
+           const auto consumed = input_interface_->GetLockstepTokenBundle();
+@@ -3159,6 +3217,18 @@
+       std::tie(has_right_hand_data_, right_hand_joint_buffer_) = input_interface_->GetHandPose(false);
+       std::tie(has_upper_body_data_, upper_body_joint_positions_buffer_) = input_interface_->GetUpperBodyJointPositions();
+       std::tie(std::ignore, upper_body_joint_velocities_buffer_) = input_interface_->GetUpperBodyJointVelocities();
++
++      // The simulation owns the arm actuators in this mode. Hold the
++      // measured arm pose in the encoder reference and retain planned waist.
++      if (sim_lockstep_ && planner_) {
++        const auto& motors = used_low_state_data_.data->motor_state();
++        has_upper_body_data_ = true;
++        for (size_t i = 3; i < upper_body_joint_positions_buffer_.size(); ++i) {
++          upper_body_joint_positions_buffer_[i] =
++              motors[upper_body_joint_isaaclab_order_in_mujoco_index[i]].q();
++          upper_body_joint_velocities_buffer_[i] = 0.0;
++        }
++      }
+ 
+       auto last_update_time = input_interface_->GetLastUpdateTime();
+       if (!sim_lockstep_ && last_update_time.has_value()) {
+@@ -4650,8 +4720,8 @@
+     std::cerr << "Error: --sim-lockstep requires --input-type zmq_manager" << std::endl;
+     return 1;
+   }
+-  if (simLockstep && !plannerFile.empty()) {
+-    std::cerr << "Error: --sim-lockstep does not permit a planner model" << std::endl;
++  if (simLockstep && !plannerFile.empty() && networkInterface != "lo") {
++    std::cerr << "Error: simulation-clock planner mode requires the loopback interface (lo)" << std::endl;
+     return 1;
+   }
+ 
