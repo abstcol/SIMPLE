@@ -167,7 +167,7 @@ def run(args, trial):
             contact_impulse[name] = contact_impulse.get(name, np.zeros(3)) + force * raw.mujoco.physics_dt
         if startup_support:
             warmup_crane()
-        next_substep += raw.mujoco.physics_dt
+        next_substep = max(next_substep, time.monotonic() - .01) + raw.mujoco.physics_dt
         time.sleep(max(0., next_substep - time.monotonic()))
         action.parameters.update(low_cmd=bridge.low_cmd, left_hand_cmd=bridge.left_hand_cmd,
                                  right_hand_cmd=bridge.right_hand_cmd)
@@ -190,10 +190,11 @@ def run(args, trial):
                                       env={**os.environ, 'SONIC_FORCE_UNITREE_DDS': '1'})
         heartbeat.start()
         try:
-            # Start above the box so SONIC's motor ramp can run without
-            # contacting it. Use the same lowering sequence as the flat-ground probe.
-            robot.elastic_band.point[2] = 1.20
-            data.qpos[2] = 1.15
+            # Initialize the crane 30 cm behind the recorded spawn. The box,
+            # tables, and task start scene retain their recorded poses.
+            robot.elastic_band.point[0] -= .30
+            data.qpos[0] -= .30
+            data.qpos[2] = .94
             data.qvel[:6] = 0.
             mujoco.mj_forward(model, data)
             proprio = robot_state()
@@ -201,29 +202,17 @@ def run(args, trial):
             while max(bridge.low_cmd.motor_cmd[i].kp for i in range(29)) <= 5:
                 if controller.poll() is not None or time.monotonic() >= deadline:
                     raise RuntimeError('SONIC did not engage. See controller.log.')
-                pub.send(build_command_message(start=False, stop=False, planner=True))
-                time.sleep(.04)
-
-            # Finish the stock motor ramp before running physics near the box.
-            time.sleep(3.1)
-            data.qpos[robot.body_joint_index + robot.qpos_offset - 1] = [
-                bridge.low_cmd.motor_cmd[i].q for i in range(29)
-            ]
-            mujoco.mj_forward(model, data)
-            proprio = robot_state()
-            for _ in range(5):
                 pub.send(build_command_message(start=True, stop=False, planner=True))
                 pub.send(planner_packet(data.qpos[:7], None, closed_hands))
-                time.sleep(.02)
+                time.sleep(.04)
             heartbeat_stop.set()
             heartbeat.join()
             last_goals = current_wrists()
 
             def tick(phase, goals):
-                nonlocal next_substep, last_goals
+                nonlocal last_goals
                 if goals is not None:
                     last_goals = goals
-                next_substep = time.monotonic()
                 if controller.poll() is not None:
                     raise RuntimeError('SONIC exited. See controller.log.')
                 hands = closed_hands if phase in ('startup', 'release_crane', 'settle', 'clear', 'ready') else open_hands
@@ -276,15 +265,11 @@ def run(args, trial):
 
             raw.substep_callback = pace_substep
             warmup_crane()
-            anchor_x = float(robot.elastic_band.point[0])
-            for step in range(330):
-                # Move back while suspended so the hands clear the box at release.
-                robot.elastic_band.point[0] = anchor_x - .30 * min(step / 80, 1.)
-                robot.elastic_band.length = -.40 * float(np.clip((step - 80) / 175, 0., 1.))
+            next_substep = time.monotonic()
+            for step in range(250):
+                robot.elastic_band.length = -.20 * min(step / 175, 1.)
                 tick('startup', None)
-            for step in range(100):
-                startup_support = 1. - (step + 1) / 100
-                tick('release_crane', None)
+            startup_support = 0.
             data.xfrc_applied[robot.band_attached_link] = 0.
             for _ in range(100):
                 tick('settle', None)
