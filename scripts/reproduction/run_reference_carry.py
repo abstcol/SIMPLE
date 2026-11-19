@@ -264,6 +264,7 @@ def main():
     lower_mask = np.zeros(robot_model.num_dofs, dtype=bool)
     lower_mask[robot_model.get_joint_group_indices('lower_body')] = True
     lower_motors = np.flatnonzero(robot_model.get_body_actuated_joints(lower_mask))
+    grounded_height = float(data.qpos[2])
     if native_start:
         # Use the native reset joint positions and suspend the pelvis above its spawn.
         lower_qpos = model.jnt_qposadr[robot.body_joint_index[lower_motors]]
@@ -285,6 +286,14 @@ def main():
     # Keep wrists clear during the base approach, then cup the lower corners.
     clear = tuple(wrist_goal([edge - .035, y + sign * .24, top + .28], reach=.10)
                   for sign in (1, -1))
+    if native_start:
+        # Start above the normal wrist-clearance pose, with the hands outside the box path.
+        offset = [0., 0., data.qpos[2] - grounded_height]
+        for side, (position, rotation) in zip(SIDES, clear):
+            ids, angles = ik.solve(side, data, position + offset, rotation, full_goal)
+            full_goal[ids] = angles
+            data.qpos[ik.arms[side][1]] = angles
+        mujoco.mj_forward(model, data)
 
     def cradle(clearance, height):
         return tuple(wrist_goal([x, y + sign * clearance, top + height],
@@ -350,7 +359,8 @@ def main():
         substep_contacts.clear()
         if band is not None and band.enable:
             robot.apply_action(band_action)
-        obs, reward, terminated, truncated, info = env.step(action)
+        step_env = raw if stage in ('crane', 'stand') else env
+        obs, reward, terminated, truncated, info = step_env.step(action)
         loads = forces_on_target(model, data, target)
         state = {'stage': stage, 'step': len(rows) + 1, 'target': info['target'].tolist(),
                  'container': info['container'].tolist(), 'official_success': bool(terminated),
@@ -448,7 +458,7 @@ def main():
         origins = ik.wrist_poses(data, joint_goal)
         joint_goal = joint_goal.copy()
         release_steps = 36
-        for step in range(trial['max_steps'] - len(rows)):
+        for step in range(trial['max_steps']):
             progress = min(1., (step + 1) / release_steps)
             smooth = progress**2 * (3. - 2. * progress)
             targets = []
