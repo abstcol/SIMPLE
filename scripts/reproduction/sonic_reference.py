@@ -63,7 +63,9 @@ class SonicReference:
                    '--zmq-host', '127.0.0.1', '--zmq-port', str(port),
                    '--zmq-out-port', str(debug_port), '--disable-crc-check',
                    '--logs-dir', str((self.output / 'sonic-controller').resolve())]
-            self.process = subprocess.Popen(cmd, cwd=deploy, stdout=log, stderr=subprocess.STDOUT)
+            # Headless control comes from ZMQ. Avoid treating inherited input as key presses.
+            self.process = subprocess.Popen(cmd, cwd=deploy, stdin=subprocess.DEVNULL,
+                                            stdout=log, stderr=subprocess.STDOUT)
             stack.callback(self.stop_controller)
             self.heartbeat_stop = threading.Event()
 
