@@ -461,7 +461,7 @@ def main():
         carry_height = .74
         transport_goal = joint_goal.copy()
         lost = 0
-        for _ in range(365):
+        for _ in range(390 if native_start else 365):
             heading = yaw_rotation(data.qpos)
             facing_basket = heading[0, 0] < -.97
             if facing_basket:
@@ -479,6 +479,9 @@ def main():
                                                rotation, transport_goal)
                         transport_goal[ids] += np.clip(angles - transport_goal[ids], -.055, .055)
                 world_velocity = np.clip(2.5 * error, [-.40, -.18], [.18, .18])
+                if native_start and error[0] < -.25:
+                    # Favor forward steps on the approach, then align laterally near the basket.
+                    world_velocity[:] = [-.45, np.clip(error[1], -.08, .08)]
                 if error[0] < -.045:
                     world_velocity[0] = min(world_velocity[0], -.12)
             else:
