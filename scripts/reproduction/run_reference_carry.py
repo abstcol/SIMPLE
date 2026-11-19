@@ -271,11 +271,11 @@ def main():
     lower_motors = np.flatnonzero(robot_model.get_body_actuated_joints(lower_mask))
     grounded_height = float(data.qpos[2])
     if native_start:
-        # Use the native reset joint positions and suspend the pelvis above its spawn.
+        # Start from the asset's native pose under the band, as in the stand-alone simulator.
         lower_qpos = model.jnt_qposadr[robot.body_joint_index[lower_motors]]
         data.qpos[lower_qpos] = model.qpos0[lower_qpos]
         band.point[:] = [*data.qpos[:2], data.geom(ground).xpos[2] + 1.]
-        data.qpos[2] = band.point[2]
+        data.qpos[2] = model.qpos0[2]
         data.qpos[3:7] = Rotation.from_matrix(yaw_rotation(data.qpos)).as_quat(scalar_first=True)
         mujoco.mj_forward(model, data)
     full_goal = robot_model.get_configuration_from_actuated_joints(

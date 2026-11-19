@@ -37,6 +37,7 @@ class SonicReference:
         self.robot = robot
         self.config = config
         self.output = output
+        self.start_request = None
 
     def __enter__(self):
         stack = self.resources = ExitStack()
@@ -117,6 +118,10 @@ class SonicReference:
             while self.process.poll() is None and time.monotonic() < deadline:
                 self.publisher.send(start)
                 self.publisher.send(hold)
+                if navigation_only and any(m.kp > 5. for m in self.bridge.low_cmd.motor_cmd[:29]):
+                    # Advance live physics during native initialization under the band.
+                    self.start_request = start
+                    return
                 planner_ready |= 'motion name is planner_motion' in log.read()
                 tick = self.debug.get_synced()
                 if planner_ready and tick is not None and np.linalg.norm(tick['token']) > 0:
@@ -127,6 +132,11 @@ class SonicReference:
     def action(self, body, left, right, navigation, height, heading, split_action=None):
         if self.process.poll() is not None:
             raise RuntimeError('SONIC exited. See sonic-controller.log.')
+        if self.start_request is not None:
+            self.publisher.send(self.start_request)
+            tick = self.debug.get_synced()
+            if tick is not None and np.linalg.norm(tick['token']) > 0:
+                self.start_request = None
         if split_action is not None:
             body = left = right = None
             height = -1.
