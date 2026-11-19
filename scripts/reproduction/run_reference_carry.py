@@ -474,12 +474,14 @@ def main():
                 if np.linalg.norm(error) < .045 and box.xpos[2] > .86:
                     break
                 if native_start and clearance > 0.:
+                    # Extend the grasp near the basket while keeping the wrist orientations.
+                    reach = .12 * float(np.clip((.32 + error[0]) / .17, 0., 1.))
+                    offset = heading @ [reach, 0., .09 * clearance]
                     for side, (position, rotation) in zip(SIDES, ik.wrist_poses(data, joint_goal)):
-                        ids, angles = ik.solve(side, data, position + [0., 0., .09 * clearance],
-                                               rotation, transport_goal)
+                        ids, angles = ik.solve(side, data, position + offset, rotation, transport_goal)
                         transport_goal[ids] += np.clip(angles - transport_goal[ids], -.055, .055)
                 world_velocity = np.clip(2.5 * error, [-.40, -.18], [.18, .18])
-                if native_start and error[0] < -.25:
+                if native_start and error[0] < -.12:
                     # Favor forward steps on the approach, then align laterally near the basket.
                     world_velocity[:] = [-.45, np.clip(error[1], -.08, .08)]
                 if error[0] < -.045:
