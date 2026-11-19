@@ -29,16 +29,13 @@ IDLE = 0
 NEUTRAL_HEAD = [0., 0., .40]
 # SONIC's virtual wrist tracking points are offset from wrist_yaw_link.
 WRIST_OFFSETS = ([.18, -.025, 0.], [.18, .025, 0.])
-# Native planner upper-body payload order, indexing the G1 motor array.
-UPPER_BODY = [12, 13, 14, 15, 22, 16, 23, 17, 24, 18, 25, 19, 26, 20, 27, 21, 28]
 
 
-def planner_packet(base, wrists, hands, stowed=None):
+def planner_packet(base, wrists, hands):
     """Convert world-frame wrist-link targets to the native three-point input."""
     fingers = dict(left_hand_position=hands[0], right_hand_position=hands[1])
     if wrists is None:
-        return build_planner_message(IDLE, (0., 0., 0.), (1., 0., 0.),
-                                     upper_body_position=stowed, **fingers)
+        return build_planner_message(IDLE, (0., 0., 0.), (1., 0., 0.), **fingers)
     to_local = Rotation.from_quat(base[3:7], scalar_first=True).inv()
     positions, orientations = [], []
     for (position, rotation), offset in zip(wrists, WRIST_OFFSETS):
@@ -209,18 +206,14 @@ def run(args, trial):
 
             # Finish the stock motor ramp before running physics near the box.
             time.sleep(3.1)
-            motor_pose = np.array([bridge.low_cmd.motor_cmd[i].q for i in range(29)])
-            # Keep the Dex3 pads behind the box while lowering and releasing.
-            motor_pose[[15, 22]] = .43
-            motor_pose[[16, 23]] = [.20, -.20]
-            motor_pose[[18, 25]] = .40
-            stowed = motor_pose[UPPER_BODY].tolist()
-            data.qpos[robot.body_joint_index + robot.qpos_offset - 1] = motor_pose
+            data.qpos[robot.body_joint_index + robot.qpos_offset - 1] = [
+                bridge.low_cmd.motor_cmd[i].q for i in range(29)
+            ]
             mujoco.mj_forward(model, data)
             proprio = robot_state()
             for _ in range(5):
                 pub.send(build_command_message(start=True, stop=False, planner=True))
-                pub.send(planner_packet(data.qpos[:7], None, closed_hands, stowed))
+                pub.send(planner_packet(data.qpos[:7], None, closed_hands))
                 time.sleep(.02)
             heartbeat_stop.set()
             heartbeat.join()
@@ -234,7 +227,7 @@ def run(args, trial):
                 if controller.poll() is not None:
                     raise RuntimeError('SONIC exited. See controller.log.')
                 hands = closed_hands if phase in ('startup', 'release_crane', 'settle', 'clear', 'ready') else open_hands
-                pub.send(planner_packet(data.qpos[:7], goals, hands, stowed))
+                pub.send(planner_packet(data.qpos[:7], goals, hands))
                 contact_impulse.clear()
                 action.parameters.update(low_cmd=bridge.low_cmd, left_hand_cmd=bridge.left_hand_cmd,
                                          right_hand_cmd=bridge.right_hand_cmd)
@@ -274,8 +267,8 @@ def run(args, trial):
 
             def quiet(window):
                 poses = np.array([row['pelvis_xyz_m'] for row in window])
-                return (len(poses) >= 20 and poses[:, 2].min() >= .70
-                        and np.linalg.norm(np.ptp(poses, axis=0)) <= .035)
+                return bool(len(poses) >= 20 and poses[:, 2].min() >= .70
+                            and np.linalg.norm(np.ptp(poses, axis=0)) <= .035)
 
             def clean_scene():
                 return all(not row['robot_contacts'] and np.linalg.norm(row['displacement_m']) <= .01
@@ -284,13 +277,13 @@ def run(args, trial):
             raw.substep_callback = pace_substep
             warmup_crane()
             anchor_x = float(robot.elastic_band.point[0])
-            for step in range(305):
+            for step in range(330):
                 # Move back while suspended so the hands clear the box at release.
                 robot.elastic_band.point[0] = anchor_x - .30 * min(step / 80, 1.)
                 robot.elastic_band.length = -.40 * float(np.clip((step - 80) / 175, 0., 1.))
                 tick('startup', None)
-            for step in range(75):
-                startup_support = 1. - (step + 1) / 75
+            for step in range(100):
+                startup_support = 1. - (step + 1) / 100
                 tick('release_crane', None)
             data.xfrc_applied[robot.band_attached_link] = 0.
             for _ in range(100):
