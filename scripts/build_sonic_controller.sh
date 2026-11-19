@@ -137,6 +137,9 @@ cmake_args=()
 if [[ -n "${SONIC_BUILD_RPATH:-}" ]]; then
   cmake_args+=("-DCMAKE_BUILD_RPATH=$SONIC_BUILD_RPATH")
 fi
+if [[ -d "$BASE/googletest-1.14.0" ]]; then
+  cmake_args+=("-DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=$BASE/googletest-1.14.0")
+fi
 cmake -S "$DEPLOY" -B "$DEPLOY/build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
   -DMSGPACK_INCLUDE_DIR="$BASE/msgpack-cxx-6.1.1/include" \
   -DZMQ_INCLUDE_DIR="$BASE/zmq-install/include" \
