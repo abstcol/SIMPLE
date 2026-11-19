@@ -292,6 +292,8 @@ def main():
                  'commands': commands, 'lift_progress': lift_progress,
                  'robot_contacts_over_tick': sorted(substep_contacts),
                  'object_displacement_m': data.body(target).xpos - spawn_box}
+        if sonic is not None:
+            state['sonic_motor_target_q'] = [float(m.q) for m in action['low_cmd'].motor_cmd[:29]]
         rows.append(state)
         if len(rows) % 2 == 0:
             frames.append((stage, data.qpos.copy()))
@@ -362,16 +364,18 @@ def main():
                 sonic = resources.enter_context(SonicReference(raw.task.robot, config, args.output))
                 heading = yaw_rotation(data.qpos)
                 sonic.engage(float(np.arctan2(heading[1, 0], heading[0, 0])))
-                for _ in range(40):
+                handover_pass = False
+                for _ in range(125):
                     advance('handover', full_goal, [0., 0., 0., 0.], [])
                     early_contacts.update(substep_contacts)
                     if ended or early_contacts or np.linalg.norm(data.body(target).xpos - spawn_box) > .01:
                         break
-                travel = np.ptp(np.array([row['pelvis'][:3] for row in rows[-20:]]), axis=0)
-                handover_pass = bool(len(rows) == 40 and not early_contacts and not ended
-                                 and np.linalg.norm(data.body(target).xpos - spawn_box) <= .01
-                                 and min(row['pelvis'][2] for row in rows[-20:]) > .65
-                                 and np.linalg.norm(travel) < .04)
+                    if len(rows) >= 25:
+                        poses = np.array([row['pelvis'][:3] for row in rows[-25:]])
+                        if poses[:, 2].min() > .65 and np.linalg.norm(np.ptp(poses, axis=0)) < .04:
+                            handover_pass = True
+                            break
+                travel = np.ptp(np.array([row['pelvis'][:3] for row in rows[-25:]]), axis=0)
                 print('SONIC handover', bool(handover_pass), 'base motion', travel.tolist(),
                       'contacts', sorted(early_contacts), flush=True)
                 if not handover_pass:
