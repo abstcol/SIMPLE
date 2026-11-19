@@ -14,5 +14,6 @@ trap 'rm -rf -- "$stage"' EXIT
 
 git -C "$upstream" archive "$revision" gear_sonic_deploy | tar -xf - -C "$stage"
 patch --batch --directory="$stage" -p1 < "$patch"
+export SONIC_BUILD_RPATH="$upstream/gear_sonic_deploy/thirdparty/unitree_sdk2/thirdparty/lib/$(uname -m)"
 SONIC_BUILD_TARGET=g1_deploy_onnx_ref bash "$root/scripts/build_sonic_controller.sh" "$stage"
 install -m 755 "$stage/gear_sonic_deploy/target/release/g1_deploy_onnx_ref" "$SONIC_TOOLS_DIR/g1_deploy_planner_lockstep"

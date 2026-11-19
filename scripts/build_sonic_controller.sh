@@ -134,6 +134,7 @@ fi
 step "Build"
 mkdir -p "$DEPLOY/build"
 cmake -S "$DEPLOY" -B "$DEPLOY/build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+  -DCMAKE_BUILD_RPATH="${SONIC_BUILD_RPATH:-}" \
   -DMSGPACK_INCLUDE_DIR="$BASE/msgpack-cxx-6.1.1/include" \
   -DZMQ_INCLUDE_DIR="$BASE/zmq-install/include" \
   -DZMQ_LIBRARY="$BASE/zmq-install/lib/libzmq.so" \
