@@ -138,7 +138,11 @@ cmake -S "$DEPLOY" -B "$DEPLOY/build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_
   -DZMQ_INCLUDE_DIR="$BASE/zmq-install/include" \
   -DZMQ_LIBRARY="$BASE/zmq-install/lib/libzmq.so" \
   -DCMAKE_PREFIX_PATH="$BASE/eigen-install;$BASE/gtest-install"
-cmake --build "$DEPLOY/build" -j"${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}"
+build_args=()
+if [[ -n "${SONIC_BUILD_TARGET:-}" ]]; then
+  build_args+=(--target "$SONIC_BUILD_TARGET")
+fi
+cmake --build "$DEPLOY/build" -j"${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}" "${build_args[@]}"
 
 if [[ -z "${SONIC_TOOLS_DIR:-}" ]]; then
   step "Prep deploy.sh's tool checks (run phase, no sudo)"

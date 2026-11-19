@@ -66,7 +66,9 @@ Use `--controller sonic-split` to start with SONIC driving the legs and waist.
 The elastic band lowers the robot until its feet bear most of the weight, then
 tapers its support. After unassisted standing on both feet, the original wrist IK, arm and finger PD, and
 contact feedback handle clearance and lift. SONIC receives the full robot state
-on each physics step and uses navigation commands with its default height.
+and navigation together at each 20 ms simulation boundary, with its default
+height. The planner ticks every five control boundaries. MuJoCo advances four
+substeps only after matching body and hand acknowledgements arrive.
 
 Use `--controller sonic` to test the previous control handover after GR00T
 stabilization and wrist clearance.
@@ -76,7 +78,7 @@ with PyZMQ and the [native SONIC models](https://nvlabs.github.io/GR00T-WholeBod
 
 ```bash
 export SONIC_TOOLS_DIR="$PWD/.tools/sonic" UV_CACHE_DIR="$PWD/.cache/uv"
-bash scripts/build_sonic_controller.sh
+bash scripts/build_sonic_planner_lockstep.sh
 source "$SONIC_TOOLS_DIR/sonic_env.sh"
 
 MUJOCO_GL=egl python scripts/reproduction/run_reference_carry.py \
