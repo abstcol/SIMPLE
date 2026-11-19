@@ -286,7 +286,7 @@ def run(args, trial):
             anchor_x = float(robot.elastic_band.point[0])
             for step in range(305):
                 # Move back while suspended so the hands clear the box at release.
-                robot.elastic_band.point[0] = anchor_x - .14 * min(step / 80, 1.)
+                robot.elastic_band.point[0] = anchor_x - .30 * min(step / 80, 1.)
                 robot.elastic_band.length = -.40 * float(np.clip((step - 80) / 175, 0., 1.))
                 tick('startup', None)
             for step in range(75):
@@ -300,7 +300,7 @@ def run(args, trial):
             gates['startup'] = clean_scene() and quiet(rows[-25:])
             print('startup', gates['startup'], flush=True)
             last_goals = current_wrists()
-            clearance = [(np.array([edge - .23, initial[1] + sign * .24, top + .31]),
+            clearance = [(np.array([data.qpos[0] + .13, data.qpos[1] + sign * .23, top + .31]),
                           Rotation.identity()) for sign in (1, -1)]
             if gates['startup'] and move('clear', 80, clearance):
                 move('ready', 35, clearance)
